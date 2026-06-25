@@ -73,6 +73,14 @@ export async function GET(request: NextRequest) {
     return new Response("Bad Request", { status: 400 });
   }
 
+  // 1. Check env var fallback first — useful before any org has configured WhatsApp
+  const envToken = process.env.WHATSAPP_VERIFY_TOKEN;
+  if (envToken && token === envToken) {
+    console.log(JSON.stringify({ event: "webhook_verified", source: "env_token" }));
+    return new Response(challenge, { status: 200 });
+  }
+
+  // 2. Fall back to per-organization token stored in DB
   const service = createServiceClient();
   const { data: raw } = await service
     .from("whatsapp_configs")
@@ -88,7 +96,7 @@ export async function GET(request: NextRequest) {
   }
 
   const { organization_id } = raw as { organization_id: string };
-  console.log(JSON.stringify({ event: "webhook_verified", organization_id }));
+  console.log(JSON.stringify({ event: "webhook_verified", source: "db", organization_id }));
   return new Response(challenge, { status: 200 });
 }
 
