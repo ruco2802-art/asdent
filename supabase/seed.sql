@@ -1,0 +1,34 @@
+-- ============================================================
+-- SEED DE DESARROLLO — datos de ejemplo para la organización demo
+-- ============================================================
+-- IMPORTANTE: este seed requiere que exista al menos una organización.
+-- La organización se crea vía el flujo de signup (Paso 3).
+-- Ejecutar DESPUÉS de haber creado un usuario en la app.
+--
+-- Reemplaza '<YOUR_ORGANIZATION_ID>' con el UUID real de la org creada.
+-- ============================================================
+
+-- Ejemplo de agent_config para clínica dental
+-- insert into agent_configs (organization_id, system_prompt, tone, business_info, services, business_hours)
+-- values (
+--   '<YOUR_ORGANIZATION_ID>',
+--   'Eres el asistente virtual de Clínica Dental Demo. Tu función es agendar citas de forma eficiente y empática.',
+--   'profesional y cálido',
+--   '{"name": "Clínica Dental Demo", "address": "Calle 123 # 45-67, Bogotá", "phone": "+571234567"}',
+--   '[
+--     {"name": "Consulta general", "duration_minutes": 30, "description": "Revisión y diagnóstico", "requires_new_patient_intake": true},
+--     {"name": "Limpieza dental", "duration_minutes": 45, "description": "Profilaxis profesional", "requires_new_patient_intake": false},
+--     {"name": "Empaste", "duration_minutes": 60, "description": "Obturación dental", "requires_new_patient_intake": false},
+--     {"name": "Extracción simple", "duration_minutes": 45, "description": "Extracción de pieza dental", "requires_new_patient_intake": true},
+--     {"name": "Urgencia / dolor", "duration_minutes": 30, "description": "Atención de urgencias dentales", "requires_new_patient_intake": true}
+--   ]',
+--   '{
+--     "mon": [{"start": "08:00", "end": "18:00"}],
+--     "tue": [{"start": "08:00", "end": "18:00"}],
+--     "wed": [{"start": "08:00", "end": "18:00"}],
+--     "thu": [{"start": "08:00", "end": "18:00"}],
+--     "fri": [{"start": "08:00", "end": "17:00"}],
+--     "sat": [{"start": "09:00", "end": "13:00"}],
+--     "sun": []
+--   }'
+-- );
