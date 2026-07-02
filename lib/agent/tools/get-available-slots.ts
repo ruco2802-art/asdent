@@ -73,7 +73,7 @@ function generateSlots(
 export function createGetAvailableSlotsTool(organizationId: string) {
   return tool({
     description:
-      "Devuelve slots de tiempo disponibles para agendar una cita, filtrando con Google Calendar FreeBusy si está configurado. Si is_urgent=true devuelve 1 slot (el más próximo en 24h); si no, devuelve hasta 3 slots en los próximos days_ahead días.",
+      "Devuelve slots de tiempo disponibles para agendar una cita, filtrando con Google Calendar FreeBusy si está configurado. Si is_urgent=true devuelve 1 slot (el más próximo en 24h); si no, devuelve hasta 3 slots en los próximos days_ahead días. Cada slot incluye un 'label' en español ya formateado — úsalo directamente, no calcules el día de la semana tú mismo.",
     inputSchema: z.object({
       service: z.string().describe("Nombre del servicio a agendar"),
       days_ahead: z
@@ -86,8 +86,14 @@ export function createGetAvailableSlotsTool(organizationId: string) {
         .describe(
           "Si true, busca solo en las próximas 24h y devuelve máximo 1 slot"
         ),
+      skip_days: z
+        .number()
+        .optional()
+        .describe(
+          "Días a saltar antes de empezar a buscar. Úsalo cuando el paciente ya rechazó los slots ofrecidos anteriormente y quiere otro día (default 0)."
+        ),
     }),
-    execute: async ({ service, days_ahead = 7, is_urgent = false }) => {
+    execute: async ({ service, days_ahead = 7, is_urgent = false, skip_days = 0 }) => {
       const db = createServiceClient();
 
       const { data: rawConfig } = await db
@@ -118,7 +124,7 @@ export function createGetAvailableSlotsTool(organizationId: string) {
         };
       }
 
-      const now = new Date();
+      const now = new Date(Date.now() + skip_days * 24 * 60 * 60 * 1000);
       const durationMin = getServiceDuration(service, services);
       const rawSlots = generateSlots(
         businessHours,
@@ -160,7 +166,20 @@ export function createGetAvailableSlotsTool(organizationId: string) {
         };
       }
 
-      return { slots, duration_minutes: durationMin };
+      const labeledSlots = slots.map((iso) => ({
+        iso,
+        label: new Intl.DateTimeFormat("es-CO", {
+          timeZone: timezone,
+          weekday: "long",
+          day: "numeric",
+          month: "long",
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+        }).format(new Date(iso)),
+      }));
+
+      return { slots: labeledSlots, duration_minutes: durationMin };
     },
   });
 }

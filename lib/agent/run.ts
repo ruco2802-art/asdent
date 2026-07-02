@@ -4,7 +4,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { createServiceClient } from "@/lib/supabase/service";
 import { sendWhatsAppMessage } from "@/lib/whatsapp/send";
 import { createAgentTools, type AgentContext } from "@/lib/agent/tools";
-import type { AgentConfig, Json } from "@/lib/database.types";
+import type { AgentConfig, Organization, Json } from "@/lib/database.types";
 
 // Day names for human-readable business hours in system prompt
 const DAY_NAMES: Record<string, string> = {
@@ -15,12 +15,26 @@ const DAY_NAMES: Record<string, string> = {
 const FALLBACK_SYSTEM_PROMPT =
   "Eres el asistente virtual de una clínica dental. Tu función es agendar citas de forma eficiente y empática. Responde siempre en español.";
 
+const FALLBACK_ERROR_MESSAGE =
+  "Disculpa, tuve un problema técnico procesando tu mensaje. Un miembro de nuestro equipo te contactará en breve 🙏";
+const FALLBACK_EMPTY_MESSAGE =
+  "Disculpa, ¿podrías repetir tu mensaje? No logré procesar bien tu solicitud.";
+
 function buildSystemPrompt(
   config: AgentConfig | null,
   bookingState: string | null,
-  bookingData: Json | null
+  bookingData: Json | null,
+  timezone: string
 ): string {
   const base = config?.system_prompt ?? FALLBACK_SYSTEM_PROMPT;
+
+  const todayStr = new Intl.DateTimeFormat("es-CO", {
+    timeZone: timezone,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date());
 
   const services = (config?.services ?? []) as {
     name: string;
@@ -59,6 +73,9 @@ function buildSystemPrompt(
   return `${base}
 
 ---
+FECHA Y HORA ACTUAL: ${todayStr} (zona horaria ${timezone})
+Usa esta fecha como referencia absoluta para calcular "hoy", "mañana", "el próximo lunes", etc. Nunca calcules ni asumas la fecha de memoria.
+
 SERVICIOS DISPONIBLES:
 ${servicesText}
 
@@ -72,8 +89,8 @@ Datos recolectados hasta ahora: ${dataText}
 REGLAS QUE DEBES SEGUIR SIN EXCEPCIÓN:
 1. Si el paciente menciona dolor, urgencia o emergencia dental, responde con empatía y usa get_available_slots con is_urgent: true.
 2. Recolecta los datos en orden: servicio → ¿es nuevo paciente? → nombre completo → slot → datos clínicos si aplica → confirmación explícita.
-3. Nunca muestres fechas en formato ISO al paciente. Usa español natural: "Martes 24 de junio a las 10:00 a.m."
-4. Nunca inventes slots. Llama a get_available_slots y ofrece solo los que devuelva.
+3. Nunca muestres fechas en formato ISO al paciente. Usa siempre el campo "label" que devuelve get_available_slots — no calcules tú el día de la semana.
+4. Nunca inventes slots. Llama a get_available_slots y ofrece solo los que devuelva. Si el paciente rechaza los slots ofrecidos, vuelve a llamar la tool aumentando skip_days.
 5. Confirma TODOS los datos explícitamente con el paciente antes de llamar a book_appointment.
 6. Si no puedes resolver algo o el paciente lo solicita, llama a request_human_handoff.
 7. Nunca preguntes el teléfono — se obtiene automáticamente de WhatsApp.
@@ -152,7 +169,16 @@ export async function runAgent(params: RunAgentParams): Promise<void> {
   // DECISION: cast necesario — supabase-js@2.49.9 infiere never para .maybeSingle() con tipos manuales
   const config = rawConfig as AgentConfig | null;
 
-  const systemPrompt = buildSystemPrompt(config, bookingState, bookingData);
+  const { data: rawOrg } = await db
+    .from("organizations")
+    .select("*")
+    .eq("id", organizationId)
+    .maybeSingle();
+  // DECISION: mismo patrón de cast
+  const org = rawOrg as Organization | null;
+  const timezone = org?.timezone ?? "America/Bogota";
+
+  const systemPrompt = buildSystemPrompt(config, bookingState, bookingData, timezone);
   const history = await fetchMessageHistory(conversationId, db);
 
   // Build the messages array, injecting image into the last user turn if present
@@ -206,10 +232,10 @@ export async function runAgent(params: RunAgentParams): Promise<void> {
         error: err instanceof Error ? err.message : String(err),
       })
     );
-    return;
+    resultText = FALLBACK_ERROR_MESSAGE;
   }
 
-  if (!resultText) return;
+  if (!resultText) resultText = FALLBACK_EMPTY_MESSAGE;
 
   // request_human_handoff sets bot_active=false and sends its own message.
   // Re-check DB to avoid sending a duplicate response in that case.
