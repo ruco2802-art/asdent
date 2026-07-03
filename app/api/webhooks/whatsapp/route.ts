@@ -13,6 +13,15 @@ import type { WhatsappConfig, Json } from "@/lib/database.types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// How long to wait for more messages from the same conversation before
+// invoking the agent, so quick consecutive WhatsApp messages get batched
+// into a single agent turn instead of racing each other.
+const DEBOUNCE_MS = 2500;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // ─── WhatsApp Cloud API v25.0 payload types ────────────────────────────────────
 
 interface WaMessage {
@@ -306,6 +315,11 @@ async function processInboundMessage(
   let bookingState: string | null = null;
   let bookingData: Json = {};
 
+  // Single timestamp for this message, written to last_message_at and later
+  // compared against the same column to detect whether a newer message
+  // arrived while this invocation was debouncing (see step 5).
+  const myTimestamp = new Date().toISOString();
+
   if (rawExisting) {
     const conv = rawExisting as {
       id: string;
@@ -320,7 +334,7 @@ async function processInboundMessage(
 
     await db
       .from("conversations")
-      .update({ last_message_at: new Date().toISOString() })
+      .update({ last_message_at: myTimestamp })
       .eq("id", conversationId);
   } else {
     const { data: rawNew, error: convError } = await db
@@ -329,7 +343,7 @@ async function processInboundMessage(
         organization_id: organizationId,
         contact_id: contactId,
         bot_active: true,
-        last_message_at: new Date().toISOString(),
+        last_message_at: myTimestamp,
       })
       .select("id")
       .single();
@@ -459,6 +473,35 @@ async function processInboundMessage(
 
   const hasContent = !!content || !!imageAttachment;
   if (botActive && hasContent) {
+    // Debounce: wait for a quiet period so rapid consecutive messages from
+    // the same patient get batched into a single agent turn instead of
+    // racing each other. If a newer message overwrote last_message_at while
+    // we waited, that invocation will become the leader and process the
+    // full batch — this one bows out.
+    await sleep(DEBOUNCE_MS);
+
+    const { data: rawLatest } = await db
+      .from("conversations")
+      .select("last_message_at")
+      .eq("id", conversationId)
+      .maybeSingle();
+    const latest = (rawLatest as { last_message_at: string | null } | null)
+      ?.last_message_at;
+
+    // Compare as epoch ms, not raw strings — Postgres/Supabase returns
+    // timestamptz as "...+00:00" while Date#toISOString() produces "...Z".
+    // Same instant, different string, so a naive !== always mismatched.
+    if (!latest || new Date(latest).getTime() !== new Date(myTimestamp).getTime()) {
+      console.log(
+        JSON.stringify({
+          event: "debounced_skip",
+          conversation_id: conversationId,
+          wa_message_id: waMessageId,
+        })
+      );
+      return;
+    }
+
     await runAgent({
       organizationId,
       contactId,
