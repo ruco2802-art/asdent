@@ -73,7 +73,7 @@ function generateSlots(
 export function createGetAvailableSlotsTool(organizationId: string) {
   return tool({
     description:
-      "Devuelve slots de tiempo disponibles para agendar una cita, filtrando con Google Calendar FreeBusy si está configurado. Si is_urgent=true devuelve 1 slot (el más próximo en 24h); si no, devuelve hasta 3 slots en los próximos days_ahead días. Cada slot incluye un 'label' en español ya formateado — úsalo directamente, no calcules el día de la semana tú mismo.",
+      "Devuelve slots de tiempo disponibles para agendar una cita, filtrando con Google Calendar FreeBusy si está configurado. Si is_urgent=true devuelve 1 slot (el más próximo en 24h); si no, devuelve hasta 3 slots en los próximos days_ahead días. Cada slot incluye un 'label' en español ya formateado — úsalo directamente, no calcules el día de la semana tú mismo. Si el paciente pidió una fecha exacta, usa preferred_date en vez de skip_days.",
     inputSchema: z.object({
       service: z.string().describe("Nombre del servicio a agendar"),
       days_ahead: z
@@ -90,10 +90,22 @@ export function createGetAvailableSlotsTool(organizationId: string) {
         .number()
         .optional()
         .describe(
-          "Días a saltar antes de empezar a buscar. Úsalo cuando el paciente ya rechazó los slots ofrecidos anteriormente y quiere otro día (default 0)."
+          "Días a saltar antes de empezar a buscar. Úsalo solo cuando el paciente pide 'otro día' o 'más adelante' sin especificar cuál (default 0)."
+        ),
+      preferred_date: z
+        .string()
+        .optional()
+        .describe(
+          "Fecha exacta que pidió el paciente, en formato YYYY-MM-DD (zona horaria de la clínica). Úsala siempre que el paciente mencione un día específico (ej. 'el viernes 10 de julio') — es más confiable que skip_days porque no depende de que tú recuerdes cuántos días llevas saltando en la conversación. Si se da, tiene prioridad sobre skip_days."
         ),
     }),
-    execute: async ({ service, days_ahead = 7, is_urgent = false, skip_days = 0 }) => {
+    execute: async ({
+      service,
+      days_ahead = 7,
+      is_urgent = false,
+      skip_days = 0,
+      preferred_date,
+    }) => {
       const db = createServiceClient();
 
       const { data: rawConfig } = await db
@@ -124,7 +136,27 @@ export function createGetAvailableSlotsTool(organizationId: string) {
         };
       }
 
-      const now = new Date(Date.now() + skip_days * 24 * 60 * 60 * 1000);
+      let now: Date;
+      if (preferred_date) {
+        const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(preferred_date);
+        if (!match) {
+          return {
+            error: `Formato de preferred_date inválido: "${preferred_date}". Usa YYYY-MM-DD.`,
+          };
+        }
+        const [y, m, d] = [
+          Number(match[1]),
+          Number(match[2]),
+          Number(match[3]),
+        ];
+        const preferredMidnightUTC = localToUTC(y, m, d, 0, 0, timezone);
+        // If the preferred date is today, anchor on the real current time
+        // (so we don't offer slots earlier than now); otherwise anchor on
+        // midnight of that day so the search starts right at it.
+        now = new Date(Math.max(Date.now(), preferredMidnightUTC.getTime()));
+      } else {
+        now = new Date(Date.now() + skip_days * 24 * 60 * 60 * 1000);
+      }
       const durationMin = getServiceDuration(service, services);
       const rawSlots = generateSlots(
         businessHours,

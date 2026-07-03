@@ -47,6 +47,26 @@ export function createBookAppointmentTool(ctx: BookContext) {
       is_urgent = false,
       medical_notes,
     }) => {
+      try {
+        return await bookAppointment();
+      } catch (err) {
+        console.error(
+          JSON.stringify({
+            event: "book_appointment_fatal_error",
+            organization_id: organizationId,
+            conversation_id: conversationId,
+            starts_at,
+            error: err instanceof Error ? err.message : String(err),
+            stack: err instanceof Error ? err.stack : undefined,
+          })
+        );
+        return {
+          error:
+            "Hubo un problema técnico al registrar la cita. Por favor intenta de nuevo o pide que te transfiramos con el equipo.",
+        };
+      }
+
+      async function bookAppointment() {
       const startsAt = new Date(starts_at);
       if (isNaN(startsAt.getTime())) {
         return { error: `Formato de fecha inválido: ${starts_at}` };
@@ -162,22 +182,29 @@ export function createBookAppointmentTool(ctx: BookContext) {
           console.error(
             JSON.stringify({
               event: "google_event_error",
+              organization_id: organizationId,
+              conversation_id: conversationId,
               appointment_id: appointmentId,
+              calendar_id: gcal.calendarId,
+              starts_at: startsAtISO,
+              ends_at: endsAt.toISOString(),
               error: err instanceof Error ? err.message : String(err),
+              stack: err instanceof Error ? err.stack : undefined,
             })
           );
         }
       }
 
-      return {
-        appointment_id: appointmentId,
-        starts_at: startsAtISO,
-        ends_at: endsAt.toISOString(),
-        service,
-        full_name,
-        duration_minutes: durationMin,
-        message: "Cita registrada correctamente.",
-      };
+        return {
+          appointment_id: appointmentId,
+          starts_at: startsAtISO,
+          ends_at: endsAt.toISOString(),
+          service,
+          full_name,
+          duration_minutes: durationMin,
+          message: "Cita registrada correctamente.",
+        };
+      }
     },
   });
 }

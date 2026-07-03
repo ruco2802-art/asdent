@@ -13,13 +13,54 @@ import type { WhatsappConfig, Json } from "@/lib/database.types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// How long to wait for more messages from the same conversation before
-// invoking the agent, so quick consecutive WhatsApp messages get batched
-// into a single agent turn instead of racing each other.
+// How long last_message_at must stay unchanged before we consider the
+// conversation "quiet" and let the agent process the accumulated messages.
 const DEBOUNCE_MS = 2500;
+// How often to re-poll last_message_at while waiting for quiet.
+const POLL_INTERVAL_MS = 400;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Polls last_message_at until it hasn't changed for a full DEBOUNCE_MS
+// window, then returns that final value. A fixed single sleep-then-compare
+// isn't enough: if one message's pipeline (webhook receipt -> DB write) is
+// slower than another's, both invocations can independently observe "nothing
+// changed since I checked" and both think they're the leader. Polling for
+// genuine quiescence converges every concurrent invocation on the same final
+// last_message_at value, so only the one whose own write matches it proceeds.
+async function waitForQuiet(
+  conversationId: string,
+  db: ReturnType<typeof createServiceClient>
+): Promise<string | null> {
+  let lastSeen: string | null = null;
+  let stableSince = Date.now();
+
+  for (;;) {
+    const { data } = await db
+      .from("conversations")
+      .select("last_message_at")
+      .eq("id", conversationId)
+      .maybeSingle();
+    const current =
+      (data as { last_message_at: string | null } | null)?.last_message_at ??
+      null;
+
+    if (
+      lastSeen === null ||
+      (current && new Date(current).getTime() !== new Date(lastSeen).getTime())
+    ) {
+      lastSeen = current;
+      stableSince = Date.now();
+    }
+
+    if (Date.now() - stableSince >= DEBOUNCE_MS) {
+      return lastSeen;
+    }
+
+    await sleep(POLL_INTERVAL_MS);
+  }
 }
 
 // ─── WhatsApp Cloud API v25.0 payload types ────────────────────────────────────
@@ -394,7 +435,7 @@ async function processInboundMessage(
           })
         );
         // Store message with null content then send fallback — don't run agent
-        await insertMessage(db, conversationId, organizationId, waMessageId, content, rawField, message.timestamp);
+        await insertMessage(db, conversationId, organizationId, waMessageId, content, rawField);
         await sendFallback(organizationId, conversationId, waPhone, "image", db);
         return;
       }
@@ -417,7 +458,7 @@ async function processInboundMessage(
             error: err instanceof Error ? err.message : String(err),
           })
         );
-        await insertMessage(db, conversationId, organizationId, waMessageId, null, rawField, message.timestamp);
+        await insertMessage(db, conversationId, organizationId, waMessageId, null, rawField);
         await sendFallback(organizationId, conversationId, waPhone, "audio", db);
         return;
       }
@@ -444,7 +485,7 @@ async function processInboundMessage(
             error: err instanceof Error ? err.message : String(err),
           })
         );
-        await insertMessage(db, conversationId, organizationId, waMessageId, null, rawField, message.timestamp);
+        await insertMessage(db, conversationId, organizationId, waMessageId, null, rawField);
         await sendFallback(organizationId, conversationId, waPhone, "document", db);
         return;
       }
@@ -452,7 +493,7 @@ async function processInboundMessage(
   }
 
   // 4. Insert message (idempotent via unique index on wa_message_id)
-  const insertErr = await insertMessage(db, conversationId, organizationId, waMessageId, content, rawField, message.timestamp);
+  const insertErr = await insertMessage(db, conversationId, organizationId, waMessageId, content, rawField);
   if (insertErr === "duplicate") return; // already processed
   if (insertErr === "error") return;
 
@@ -473,25 +514,20 @@ async function processInboundMessage(
 
   const hasContent = !!content || !!imageAttachment;
   if (botActive && hasContent) {
-    // Debounce: wait for a quiet period so rapid consecutive messages from
-    // the same patient get batched into a single agent turn instead of
-    // racing each other. If a newer message overwrote last_message_at while
-    // we waited, that invocation will become the leader and process the
-    // full batch — this one bows out.
-    await sleep(DEBOUNCE_MS);
-
-    const { data: rawLatest } = await db
-      .from("conversations")
-      .select("last_message_at")
-      .eq("id", conversationId)
-      .maybeSingle();
-    const latest = (rawLatest as { last_message_at: string | null } | null)
-      ?.last_message_at;
+    // Debounce: wait until last_message_at has been quiet for DEBOUNCE_MS so
+    // rapid consecutive messages from the same patient get batched into a
+    // single agent turn instead of racing each other. Every concurrent
+    // invocation converges on the same final last_message_at value; only the
+    // one whose own write matches it is the leader and proceeds.
+    const finalTimestamp = await waitForQuiet(conversationId, db);
 
     // Compare as epoch ms, not raw strings — Postgres/Supabase returns
     // timestamptz as "...+00:00" while Date#toISOString() produces "...Z".
     // Same instant, different string, so a naive !== always mismatched.
-    if (!latest || new Date(latest).getTime() !== new Date(myTimestamp).getTime()) {
+    if (
+      !finalTimestamp ||
+      new Date(finalTimestamp).getTime() !== new Date(myTimestamp).getTime()
+    ) {
       console.log(
         JSON.stringify({
           event: "debounced_skip",
@@ -522,10 +558,16 @@ async function insertMessage(
   organizationId: string,
   waMessageId: string,
   content: string | null,
-  raw: Json,
-  timestamp: string
+  raw: Json
 ): Promise<"ok" | "duplicate" | "error"> {
-  const createdAt = new Date(parseInt(timestamp, 10) * 1000).toISOString();
+  // Use server receipt time, not WhatsApp's payload timestamp (whole seconds,
+  // no ms) — mixing that with the ms-precision created_at we use for outbound
+  // bot replies can invert ordering when the bot takes a few seconds to
+  // respond, corrupting fetchMessageHistory's role alternation (a later
+  // inbound message can sort before the bot's still-processing reply to the
+  // previous one, ending the conversation on "assistant" instead of "user",
+  // which Claude's API rejects outright).
+  const createdAt = new Date().toISOString();
 
   const { error } = await db.from("messages").insert({
     conversation_id: conversationId,
