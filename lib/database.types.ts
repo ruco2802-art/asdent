@@ -157,6 +157,7 @@ export interface Database {
           business_hours: Json;
           handoff_message: string | null;
           confirmation_template: string | null;
+          assistant_name: string | null;
           updated_at: string | null;
         };
         Insert: {
@@ -168,6 +169,7 @@ export interface Database {
           business_hours?: Json;
           handoff_message?: string | null;
           confirmation_template?: string | null;
+          assistant_name?: string | null;
           updated_at?: string | null;
         };
         Update: {
@@ -179,6 +181,7 @@ export interface Database {
           business_hours?: Json;
           handoff_message?: string | null;
           confirmation_template?: string | null;
+          assistant_name?: string | null;
           updated_at?: string | null;
         };
         Relationships: [

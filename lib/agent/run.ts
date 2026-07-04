@@ -4,7 +4,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 import { createServiceClient } from "@/lib/supabase/service";
 import { sendWhatsAppMessage } from "@/lib/whatsapp/send";
 import { createAgentTools, type AgentContext } from "@/lib/agent/tools";
-import type { AgentConfig, Organization, Json } from "@/lib/database.types";
+import type { AgentConfig, Organization, Contact, Json } from "@/lib/database.types";
 
 // Day names for human-readable business hours in system prompt
 const DAY_NAMES: Record<string, string> = {
@@ -24,9 +24,13 @@ function buildSystemPrompt(
   config: AgentConfig | null,
   bookingState: string | null,
   bookingData: Json | null,
-  timezone: string
+  timezone: string,
+  contactName: string | null
 ): string {
   const base = config?.system_prompt ?? FALLBACK_SYSTEM_PROMPT;
+  const assistantName = config?.assistant_name?.trim() || "Valentina";
+  const businessInfo = (config?.business_info ?? {}) as { name?: string };
+  const clinicName = businessInfo.name?.trim() || "la clínica";
 
   const todayStr = new Intl.DateTimeFormat("es-CO", {
     timeZone: timezone,
@@ -70,9 +74,26 @@ function buildSystemPrompt(
   const stateText = bookingState ?? "sin iniciar";
   const dataText = JSON.stringify(bookingData ?? {});
 
+  const contactText = contactName
+    ? `El paciente ya es conocido y se llama ${contactName}. Salúdalo por su nombre desde tu primer mensaje de esta conversación — no esperes a que te lo repita ni se lo vuelvas a preguntar.`
+    : "Todavía no sabemos el nombre del paciente. Pregúntaselo de forma natural en algún momento temprano de la conversación, después de saludar — nunca antes del saludo.";
+
   return `${base}
 
 ---
+QUIÉN ERES:
+Te llamas ${assistantName} y trabajas como recepcionista en ${clinicName}, una clínica dental en Neiva. No eres un bot, ni un asistente virtual, ni un modelo de IA — eres una persona real del equipo, la mejor recepcionista de una clínica dental premium: cálida, profesional, y muy atenta al detalle emocional del paciente. Hablas como una colombiana de Neiva, con expresiones naturales como "claro que sí", "con mucho gusto", "listo", "no hay problema" — nunca como un manual corporativo ni como un chatbot genérico.
+
+CÓMO ESCRIBES (esto es tan importante como lo que dices):
+- Respuestas cortas: máximo 3-4 líneas por mensaje. Nunca párrafos largos.
+- Prosa natural, como si estuvieras escribiendo por WhatsApp — nunca listas con viñetas o numeradas. La única excepción es cuando ofrezcas los horarios de get_available_slots: ahí sí puedes enumerarlos brevemente, pero en una frase natural ("Tengo jueves a las 3, a las 3:30 o a las 4 de la tarde"), no como una lista de tarjetas con emoji de calendario.
+- Negrita SOLO para fechas, horas y precios puntuales — nunca para frases completas ni para dar énfasis general.
+- Máximo 2 emojis por mensaje, y solo al principio o al final — nunca en medio de una frase.
+- Sé empático pero directo: "Entiendo, no hay problema" en vez de un párrafo explicando cuánto lo sientes. Si el paciente menciona dolor, nervios o algo delicado, reconócelo en una frase breve y sincera antes de seguir con la gestión — eso es lo que te hace mejor que cualquier bot, no el largo de la respuesta.
+- En tu primer mensaje de cada conversación nueva, preséntate de forma parecida a: "Hola, ¿cómo estás? Bienvenido/a a ${clinicName}, soy ${assistantName}. Para mí será un placer atenderte." Adáptalo de forma natural a la conversación — no lo repitas palabra por palabra siempre.
+
+${contactText}
+
 FECHA Y HORA ACTUAL: ${todayStr} (zona horaria ${timezone})
 Usa esta fecha como referencia absoluta para calcular "hoy", "mañana", "el próximo lunes", etc. Nunca calcules ni asumas la fecha de memoria.
 
@@ -87,8 +108,8 @@ Etapa de agendamiento: ${stateText}
 Datos recolectados hasta ahora: ${dataText}
 
 REGLAS QUE DEBES SEGUIR SIN EXCEPCIÓN:
-1. Si el paciente menciona dolor, urgencia o emergencia dental, responde con empatía y usa get_available_slots con is_urgent: true.
-2. Recolecta los datos en orden: servicio → ¿es nuevo paciente? → nombre completo → slot → datos clínicos si aplica → confirmación explícita.
+1. Si el paciente menciona dolor, urgencia o emergencia dental, reconócelo brevemente y usa get_available_slots con is_urgent: true.
+2. Recolecta los datos en orden: servicio → ¿es nuevo paciente? → nombre completo (sáltatelo si ya lo sabes) → slot → datos clínicos si aplica → confirmación explícita.
 3. Nunca muestres fechas en formato ISO al paciente. Usa siempre el campo "label" que devuelve get_available_slots — no calcules tú el día de la semana.
 4. Nunca inventes slots. Llama a get_available_slots y ofrece solo los que devuelva. Si el paciente rechaza los slots ofrecidos y pide "otro día" sin especificar, vuelve a llamar la tool aumentando skip_days. Si el paciente menciona una fecha exacta ("el viernes 10 de julio"), usa preferred_date con esa fecha en vez de skip_days.
 5. Cuando el paciente elija uno de los horarios que ya le mostraste, usa exactamente ese "iso" para book_appointment — no vuelvas a llamar get_available_slots para "verificar" un slot que tú mismo ya ofreciste en esta conversación.
@@ -185,7 +206,22 @@ export async function runAgent(params: RunAgentParams): Promise<void> {
   const org = rawOrg as Organization | null;
   const timezone = org?.timezone ?? "America/Bogota";
 
-  const systemPrompt = buildSystemPrompt(config, bookingState, bookingData, timezone);
+  const { data: rawContact } = await db
+    .from("contacts")
+    .select("full_name")
+    .eq("id", contactId)
+    .maybeSingle();
+  // DECISION: cast necesario — mismo patrón de cast
+  const contactName = (rawContact as Pick<Contact, "full_name"> | null)
+    ?.full_name?.trim() || null;
+
+  const systemPrompt = buildSystemPrompt(
+    config,
+    bookingState,
+    bookingData,
+    timezone,
+    contactName
+  );
   const history = await fetchMessageHistory(conversationId, db);
 
   // Build the messages array, injecting image into the last user turn if present

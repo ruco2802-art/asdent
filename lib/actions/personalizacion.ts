@@ -29,6 +29,8 @@ export async function saveAgentConfigAction(
   const system_prompt =
     (formData.get("system_prompt") as string)?.trim() || DEFAULT_PROMPT;
   const tone = (formData.get("tone") as string) || "profesional y cálido";
+  const assistant_name =
+    (formData.get("assistant_name") as string)?.trim() || "Valentina";
   const handoff_message =
     (formData.get("handoff_message") as string)?.trim() || null;
   const confirmation_template =
@@ -60,6 +62,7 @@ export async function saveAgentConfigAction(
       organization_id: orgId,
       system_prompt,
       tone,
+      assistant_name,
       business_info,
       services,
       business_hours,

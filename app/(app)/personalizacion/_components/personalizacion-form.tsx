@@ -122,6 +122,9 @@ export function PersonalizacionForm({
   const [tone, setTone] = useState(
     initialConfig?.tone ?? "profesional y cálido"
   );
+  const [assistantName, setAssistantName] = useState(
+    initialConfig?.assistant_name ?? "Valentina"
+  );
   const [businessInfo, setBusinessInfo] = useState<BusinessInfo>(
     initBusinessInfo(initialConfig?.business_info)
   );
@@ -163,6 +166,7 @@ export function PersonalizacionForm({
     const fd = new FormData();
     fd.set("system_prompt", systemPrompt);
     fd.set("tone", tone);
+    fd.set("assistant_name", assistantName);
     fd.set("handoff_message", handoffMsg);
     fd.set("confirmation_template", confirmTpl);
     fd.set("business_info", JSON.stringify(businessInfo));
@@ -318,19 +322,30 @@ export function PersonalizacionForm({
 
       {/* ── Prompt y tono ── */}
       <Section title="Prompt del asistente">
-        <Field label="Tono de voz">
-          <select
-            value={tone}
-            onChange={(e) => setTone(e.target.value)}
-            className={inputCls}
-          >
-            {TONES.map((t) => (
-              <option key={t} value={t}>
-                {t.charAt(0).toUpperCase() + t.slice(1)}
-              </option>
-            ))}
-          </select>
-        </Field>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Nombre del asistente">
+            <input
+              type="text"
+              value={assistantName}
+              onChange={(e) => setAssistantName(e.target.value)}
+              className={inputCls}
+              placeholder="Valentina"
+            />
+          </Field>
+          <Field label="Tono de voz">
+            <select
+              value={tone}
+              onChange={(e) => setTone(e.target.value)}
+              className={inputCls}
+            >
+              {TONES.map((t) => (
+                <option key={t} value={t}>
+                  {t.charAt(0).toUpperCase() + t.slice(1)}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
         <Field label="System prompt" className="mt-4">
           <textarea
             value={systemPrompt}
