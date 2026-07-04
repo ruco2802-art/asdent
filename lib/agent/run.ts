@@ -114,16 +114,22 @@ async function fetchMessageHistory(
   conversationId: string,
   db: ReturnType<typeof createServiceClient>
 ): Promise<Array<{ role: "user"; content: string } | { role: "assistant"; content: string }>> {
+  // Fetch the most recent 20 (descending), then reverse to chronological
+  // order. Ordering ascending+limit(20) would instead return the OLDEST 20
+  // messages, permanently excluding the newest ones (including the message
+  // that just triggered this run) once a conversation passes 20 messages.
   const { data } = await db
     .from("messages")
     .select("direction, content")
     .eq("conversation_id", conversationId)
-    .order("created_at", { ascending: true })
+    .order("created_at", { ascending: false })
     .limit(20);
 
   if (!data?.length) return [];
 
-  const rows = data as { direction: string; content: string | null }[];
+  const rows = (
+    data as { direction: string; content: string | null }[]
+  ).reverse();
   const messages: Array<{ role: "user"; content: string } | { role: "assistant"; content: string }> = [];
 
   for (const row of rows) {
@@ -210,30 +216,49 @@ export async function runAgent(params: RunAgentParams): Promise<void> {
     return;
   }
 
+  // Claude's API rejects a conversation that doesn't end on a user turn.
+  // This should be structurally impossible now (the just-inserted inbound
+  // message is always the newest row), but if it ever happens again, skip
+  // straight to the fallback instead of burning an API call guaranteed to
+  // error out with "must end with a user message".
+  const historyEndsInUser = messages[messages.length - 1].role === "user";
+  if (!historyEndsInUser) {
+    console.error(
+      JSON.stringify({
+        event: "agent_history_not_ending_in_user",
+        conversation_id: conversationId,
+      })
+    );
+  }
+
   const agentCtx: AgentContext = { organizationId, contactId, conversationId, waPhone };
 
   let resultText: string;
-  try {
-    const result = await generateText({
-      model: anthropic("claude-sonnet-4-6"),
-      system: systemPrompt,
-      // DECISION: cast necesario — Msg es estructuralmente compatible con ModelMessage
-      // pero TS no puede inferirlo por la unión discriminada de UserModelMessage.content
-      messages: messages as unknown as ModelMessage[],
-      tools: createAgentTools(agentCtx),
-      stopWhen: stepCountIs(10),
-      temperature: 0.3,
-    });
-    resultText = result.text;
-  } catch (err) {
-    console.error(
-      JSON.stringify({
-        event: "agent_error",
-        conversation_id: conversationId,
-        error: err instanceof Error ? err.message : String(err),
-      })
-    );
-    resultText = FALLBACK_ERROR_MESSAGE;
+  if (!historyEndsInUser) {
+    resultText = FALLBACK_EMPTY_MESSAGE;
+  } else {
+    try {
+      const result = await generateText({
+        model: anthropic("claude-sonnet-4-6"),
+        system: systemPrompt,
+        // DECISION: cast necesario — Msg es estructuralmente compatible con ModelMessage
+        // pero TS no puede inferirlo por la unión discriminada de UserModelMessage.content
+        messages: messages as unknown as ModelMessage[],
+        tools: createAgentTools(agentCtx),
+        stopWhen: stepCountIs(10),
+        temperature: 0.3,
+      });
+      resultText = result.text;
+    } catch (err) {
+      console.error(
+        JSON.stringify({
+          event: "agent_error",
+          conversation_id: conversationId,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      );
+      resultText = FALLBACK_ERROR_MESSAGE;
+    }
   }
 
   if (!resultText) resultText = FALLBACK_EMPTY_MESSAGE;
