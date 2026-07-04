@@ -21,13 +21,17 @@ function isSlotBusy(
   return busyPeriods.some((b) => slotStart < b.end && slotEnd > b.start);
 }
 
+type TimeOfDay = "mañana" | "tarde";
+const NOON_MIN = 12 * 60;
+
 function generateSlots(
   businessHours: BusinessHours,
   durationMin: number,
   daysAhead: number,
   timezone: string,
   isUrgent: boolean,
-  now: Date
+  now: Date,
+  timeOfDay?: TimeOfDay
 ): string[] {
   const slots: string[] = [];
   const limit = isUrgent ? 1 : 3;
@@ -47,7 +51,14 @@ function generateSlots(
       const [sh, sm] = period.start.split(":").map(Number);
       const [eh, em] = period.end.split(":").map(Number);
       let cur = sh * 60 + (sm ?? 0);
-      const end = eh * 60 + (em ?? 0);
+      let end = eh * 60 + (em ?? 0);
+      // Clamp the period to the requested half of the day. Without this,
+      // the limit below (3 total slots) always gets filled by the earliest
+      // chronological slots — which are always in the morning whenever
+      // business hours open early — so an afternoon preference could never
+      // surface even when the day has plenty of afternoon availability.
+      if (timeOfDay === "mañana") end = Math.min(end, NOON_MIN);
+      if (timeOfDay === "tarde") cur = Math.max(cur, NOON_MIN);
 
       while (cur + durationMin <= end && slots.length < limit) {
         const slotUTC = localToUTC(
@@ -73,7 +84,7 @@ function generateSlots(
 export function createGetAvailableSlotsTool(organizationId: string) {
   return tool({
     description:
-      "Devuelve slots de tiempo disponibles para agendar una cita, filtrando con Google Calendar FreeBusy si está configurado. Si is_urgent=true devuelve 1 slot (el más próximo en 24h); si no, devuelve hasta 3 slots en los próximos days_ahead días. Cada slot incluye un 'label' en español ya formateado — úsalo directamente, no calcules el día de la semana tú mismo. Si el paciente pidió una fecha exacta, usa preferred_date en vez de skip_days.",
+      "Devuelve slots de tiempo disponibles para agendar una cita, filtrando con Google Calendar FreeBusy si está configurado. Si is_urgent=true devuelve 1 slot (el más próximo en 24h); si no, devuelve hasta 3 slots en los próximos days_ahead días. Cada slot incluye un 'label' en español ya formateado — úsalo directamente, no calcules el día de la semana tú mismo. Si el paciente pidió una fecha exacta, usa preferred_date en vez de skip_days. Si el paciente prefiere mañana o tarde, usa time_of_day.",
     inputSchema: z.object({
       service: z.string().describe("Nombre del servicio a agendar"),
       days_ahead: z
@@ -98,6 +109,12 @@ export function createGetAvailableSlotsTool(organizationId: string) {
         .describe(
           "Fecha exacta que pidió el paciente, en formato YYYY-MM-DD (zona horaria de la clínica). Úsala siempre que el paciente mencione un día específico (ej. 'el viernes 10 de julio') — es más confiable que skip_days porque no depende de que tú recuerdes cuántos días llevas saltando en la conversación. Si se da, tiene prioridad sobre skip_days."
         ),
+      time_of_day: z
+        .enum(["mañana", "tarde"])
+        .optional()
+        .describe(
+          "Si el paciente prefiere mañana o tarde, fíltralo aquí. Sin esto, la tool solo devuelve los 3 horarios más tempranos del día (que casi siempre caen en la mañana) — usar time_of_day es la única forma de encontrar horarios de tarde en un día con jornada larga."
+        ),
     }),
     execute: async ({
       service,
@@ -105,6 +122,7 @@ export function createGetAvailableSlotsTool(organizationId: string) {
       is_urgent = false,
       skip_days = 0,
       preferred_date,
+      time_of_day,
     }) => {
       const db = createServiceClient();
 
@@ -164,7 +182,8 @@ export function createGetAvailableSlotsTool(organizationId: string) {
         days_ahead,
         timezone,
         is_urgent,
-        now
+        now,
+        time_of_day
       );
 
       // Filter by Google Calendar FreeBusy if the org has it configured
@@ -193,8 +212,9 @@ export function createGetAvailableSlotsTool(organizationId: string) {
       if (slots.length === 0) {
         return {
           slots: [],
-          message:
-            "No hay disponibilidad en el período solicitado. Intenta con más días o un horario diferente.",
+          message: time_of_day
+            ? `No hay disponibilidad en la ${time_of_day} para el período solicitado. Intenta sin time_of_day, con más días, o con el otro horario del día.`
+            : "No hay disponibilidad en el período solicitado. Intenta con más días o un horario diferente.",
         };
       }
 
