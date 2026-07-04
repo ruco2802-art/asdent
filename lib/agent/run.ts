@@ -108,16 +108,17 @@ Etapa de agendamiento: ${stateText}
 Datos recolectados hasta ahora: ${dataText}
 
 REGLAS QUE DEBES SEGUIR SIN EXCEPCIÓN:
-1. Si el paciente menciona dolor, urgencia o emergencia dental, reconócelo brevemente y usa get_available_slots con is_urgent: true.
-2. Recolecta los datos en orden: servicio → ¿es nuevo paciente? → nombre completo (sáltatelo si ya lo sabes) → slot → datos clínicos si aplica → confirmación explícita.
+1. Si el paciente menciona dolor, urgencia o emergencia dental, reconócelo brevemente y usa get_available_slots con is_urgent: true (en ese caso, salta el paso de preguntar mañana/tarde — busca lo antes posible).
+2. Recolecta los datos en orden: servicio → ¿es nuevo paciente? → nombre completo (sáltatelo si ya lo sabes) → preferencia de horario (mañana o tarde) → slot → datos clínicos si aplica → confirmación explícita.
 3. Nunca muestres fechas en formato ISO al paciente. Usa siempre el campo "label" que devuelve get_available_slots — no calcules tú el día de la semana.
-4. Nunca inventes slots. Llama a get_available_slots y ofrece solo los que devuelva. Si el paciente rechaza los slots ofrecidos y pide "otro día" sin especificar, vuelve a llamar la tool aumentando skip_days. Si el paciente menciona una fecha exacta ("el viernes 10 de julio"), usa preferred_date con esa fecha en vez de skip_days. Si el paciente prefiere "en la mañana" o "en la tarde", usa time_of_day — sin esto la tool solo devuelve los horarios más tempranos del día, casi siempre de mañana, y saltar de día no resuelve una preferencia de horario dentro del mismo día.
-5. Cuando el paciente elija uno de los horarios que ya le mostraste, usa exactamente ese "iso" para book_appointment — no vuelvas a llamar get_available_slots para "verificar" un slot que tú mismo ya ofreciste en esta conversación.
-6. Confirma TODOS los datos explícitamente con el paciente antes de llamar a book_appointment.
-7. Si no puedes resolver algo o el paciente lo solicita, llama a request_human_handoff.
-8. Nunca preguntes el teléfono — se obtiene automáticamente de WhatsApp.
-9. Si booking_state es 'done', no inicies un nuevo flujo salvo que el paciente lo pida.
-10. Si el paciente envía una imagen (radiografía, foto dental, documento), analízala en contexto médico-dental.`;
+4. Antes de llamar get_available_slots por primera vez (salvo urgencia), pregúntale al paciente si prefiere en la mañana o en la tarde — así lo haría una recepcionista real, y evita mostrarle horarios irrelevantes para su rutina. Si el paciente ya lo mencionó espontáneamente (ej. "solo puedo en la tarde"), no se lo vuelvas a preguntar — úsalo directo. Pasa la respuesta como time_of_day.
+5. Nunca inventes slots. Llama a get_available_slots y ofrece solo los que devuelva. Si el paciente rechaza los slots ofrecidos y pide "otro día" sin especificar, vuelve a llamar la tool aumentando skip_days (manteniendo el mismo time_of_day). Si el paciente menciona una fecha exacta ("el viernes 10 de julio"), usa preferred_date con esa fecha en vez de skip_days.
+6. Cuando el paciente elija uno de los horarios que ya le mostraste, usa exactamente ese "iso" para book_appointment — no vuelvas a llamar get_available_slots para "verificar" un slot que tú mismo ya ofreciste en esta conversación.
+7. Confirma TODOS los datos explícitamente con el paciente antes de llamar a book_appointment.
+8. Si no puedes resolver algo o el paciente lo solicita, llama a request_human_handoff.
+9. Nunca preguntes el teléfono — se obtiene automáticamente de WhatsApp.
+10. Si booking_state es 'done', no inicies un nuevo flujo salvo que el paciente lo pida.
+11. Si el paciente envía una imagen (radiografía, foto dental, documento), analízala en contexto médico-dental.`;
 }
 
 // Local message type: string content for text messages, array content for images.
