@@ -33,34 +33,29 @@ function generateSlots(
   now: Date,
   timeOfDay?: TimeOfDay
 ): string[] {
-  const slots: string[] = [];
-  const limit = isUrgent ? 1 : 3;
-  // Urgent = look 2 days (~48h) at most to find 1 slot in the next 24h
+  // Urgent = look 2 days (~48h) at most to find the single soonest slot
   const maxDays = isUrgent ? 2 : daysAhead;
   const urgentCutoff = now.getTime() + 24 * 60 * 60 * 1000;
   // 30-min buffer so we never offer a slot that starts in the next 30 minutes
   const earliest = now.getTime() + 30 * 60 * 1000;
 
-  for (let d = 0; d < maxDays && slots.length < limit; d++) {
+  for (let d = 0; d < maxDays; d++) {
     const dayStart = new Date(now.getTime() + d * 24 * 60 * 60 * 1000);
     const weekday = getWeekdayInTz(dayStart, timezone);
     const periods = businessHours[weekday] ?? [];
     const { year, month, day } = getDatePartsInTz(dayStart, timezone);
+    const daySlots: string[] = [];
 
     for (const period of periods) {
       const [sh, sm] = period.start.split(":").map(Number);
       const [eh, em] = period.end.split(":").map(Number);
       let cur = sh * 60 + (sm ?? 0);
       let end = eh * 60 + (em ?? 0);
-      // Clamp the period to the requested half of the day. Without this,
-      // the limit below (3 total slots) always gets filled by the earliest
-      // chronological slots — which are always in the morning whenever
-      // business hours open early — so an afternoon preference could never
-      // surface even when the day has plenty of afternoon availability.
+      // Clamp the period to the requested half of the day.
       if (timeOfDay === "mañana") end = Math.min(end, NOON_MIN);
       if (timeOfDay === "tarde") cur = Math.max(cur, NOON_MIN);
 
-      while (cur + durationMin <= end && slots.length < limit) {
+      while (cur + durationMin <= end) {
         const slotUTC = localToUTC(
           year,
           month,
@@ -71,20 +66,31 @@ function generateSlots(
         );
         const t = slotUTC.getTime();
         if (t >= earliest && (!isUrgent || t <= urgentCutoff)) {
-          slots.push(slotUTC.toISOString());
+          daySlots.push(slotUTC.toISOString());
+          // Urgent wants only the single soonest slot, not the whole day.
+          if (isUrgent) break;
         }
         cur += 30; // 30-min grid
       }
+      if (isUrgent && daySlots.length > 0) break;
     }
+
+    // Return every slot of the FIRST day that has any availability in the
+    // requested window — not an arbitrary cap. Capping at a fixed number
+    // (previously 3) meant the earliest slots of a long business day always
+    // won, so a patient asking for 3pm could never be told the truth once
+    // the day's first 3 half-hour slots (always in the morning) filled the
+    // quota. If this day has nothing, keep looking at subsequent days.
+    if (daySlots.length > 0) return daySlots;
   }
 
-  return slots;
+  return [];
 }
 
 export function createGetAvailableSlotsTool(organizationId: string) {
   return tool({
     description:
-      "Devuelve slots de tiempo disponibles para agendar una cita, filtrando con Google Calendar FreeBusy si está configurado. Si is_urgent=true devuelve 1 slot (el más próximo en 24h); si no, devuelve hasta 3 slots en los próximos days_ahead días. Cada slot incluye un 'label' en español ya formateado — úsalo directamente, no calcules el día de la semana tú mismo. Si el paciente pidió una fecha exacta, usa preferred_date en vez de skip_days. Si el paciente prefiere mañana o tarde, usa time_of_day.",
+      "Devuelve TODOS los slots de tiempo disponibles del primer día con disponibilidad dentro de la ventana solicitada, filtrando con Google Calendar FreeBusy si está configurado. Si is_urgent=true devuelve solo el slot más próximo en 24h. Cada slot incluye un 'label' en español ya formateado — úsalo directamente, no calcules el día de la semana tú mismo. Si el paciente pidió una fecha exacta, usa preferred_date en vez de skip_days. Si el paciente prefiere mañana o tarde, usa time_of_day. Como devuelve la lista completa del día, puedes verificar con certeza si una hora específica que pida el paciente (ej. '¿a las 3pm hay?') está o no en el resultado — nunca respondas que no hay disponibilidad sin haber consultado esta tool para esa hora exacta.",
     inputSchema: z.object({
       service: z.string().describe("Nombre del servicio a agendar"),
       days_ahead: z
