@@ -20,7 +20,7 @@ export function createBookAppointmentTool(ctx: BookContext) {
 
   return tool({
     description:
-      "Crea una cita, la registra en el sistema y crea el evento en Google Calendar. Llamar solo después de que el paciente haya confirmado explícitamente el nombre, servicio, fecha y hora.",
+      "Crea una cita, la registra en el sistema y crea el evento en Google Calendar. Llamar solo después de que el paciente haya confirmado explícitamente el nombre, servicio, fecha y hora. Incluye siempre 'reason' con un resumen del motivo de consulta — el odontólogo lo ve en el dashboard antes de la cita.",
     inputSchema: z.object({
       full_name: z.string().describe("Nombre completo del paciente"),
       service: z.string().describe("Nombre del servicio dental"),
@@ -38,6 +38,11 @@ export function createBookAppointmentTool(ctx: BookContext) {
         .string()
         .optional()
         .describe("Notas médicas relevantes (alergias, anticoagulantes, etc.)"),
+      reason: z
+        .string()
+        .describe(
+          "Resumen breve (1-2 frases) del motivo de la consulta, en base a lo que contó el paciente durante la conversación — para que el odontólogo pueda prepararse con anticipación antes de la cita. Ej: 'Dolor en muela inferior derecha desde hace 3 días' o 'Valoración de ventana quirúrgica para niña de 8 años, primera consulta'. Sé específico con los síntomas o la solicitud puntual del paciente, no repitas solo el nombre del servicio."
+        ),
     }),
     execute: async ({
       full_name,
@@ -46,6 +51,7 @@ export function createBookAppointmentTool(ctx: BookContext) {
       is_new_patient,
       is_urgent = false,
       medical_notes,
+      reason,
     }) => {
       try {
         return await bookAppointment();
@@ -126,6 +132,7 @@ export function createBookAppointmentTool(ctx: BookContext) {
           full_name,
           phone: waPhone,
           medical_notes: medical_notes ?? null,
+          notes: reason,
           // google_event_id: null — TODO Paso 10
         })
         .select("id")
@@ -154,6 +161,7 @@ export function createBookAppointmentTool(ctx: BookContext) {
             `Servicio: ${service}`,
             `Paciente: ${full_name}`,
             `Teléfono: ${waPhone}`,
+            `Motivo: ${reason}`,
             ...(medical_notes ? [`Notas médicas: ${medical_notes}`] : []),
             is_urgent ? "⚠️ URGENCIA" : "",
             is_new_patient ? "🆕 Paciente nuevo" : "",

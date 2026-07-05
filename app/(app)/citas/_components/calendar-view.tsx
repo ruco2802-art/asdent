@@ -11,6 +11,7 @@ import {
   Clock,
   Phone,
   Clipboard,
+  ChatText,
 } from "@phosphor-icons/react";
 import { updateAppointmentStatusAction } from "@/lib/actions/appointments";
 
@@ -24,6 +25,7 @@ type Appt = {
   is_new_patient: boolean | null;
   full_name: string;
   phone: string;
+  notes: string | null;
   medical_notes: string | null;
 };
 
@@ -332,6 +334,22 @@ export function CalendarView({ appointments, timezone, year, month }: Props) {
                   {fmtFull(selected.starts_at, timezone)}
                 </span>
               </div>
+              {selected.notes && (
+                <div className="flex items-start gap-2.5 bg-stone-50 rounded-lg px-2.5 py-2">
+                  <ChatText
+                    size={15}
+                    className="text-stone-400 flex-shrink-0 mt-0.5"
+                  />
+                  <div>
+                    <p className="text-[11px] font-medium text-stone-400 uppercase tracking-wide mb-0.5">
+                      Motivo de la consulta
+                    </p>
+                    <span className="text-slate-600 text-xs leading-relaxed">
+                      {selected.notes}
+                    </span>
+                  </div>
+                </div>
+              )}
               {selected.medical_notes && (
                 <div className="flex items-start gap-2.5">
                   <Clipboard

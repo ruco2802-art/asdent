@@ -62,7 +62,7 @@ export default async function CitasPage({
   const { data: rawAppts } = await supabase
     .from("appointments")
     .select(
-      "id, service, starts_at, ends_at, status, is_urgent, is_new_patient, full_name, phone, medical_notes"
+      "id, service, starts_at, ends_at, status, is_urgent, is_new_patient, full_name, phone, notes, medical_notes"
     )
     .eq("organization_id", organizationId)
     .gte("starts_at", startOfMonth)
@@ -80,6 +80,7 @@ export default async function CitasPage({
     is_new_patient: boolean | null;
     full_name: string;
     phone: string;
+    notes: string | null;
     medical_notes: string | null;
   }>;
 
