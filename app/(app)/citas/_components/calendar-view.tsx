@@ -99,9 +99,21 @@ export function CalendarView({ appointments, timezone, year, month }: Props) {
     (apptsByDay[d] ??= []).push(a);
   }
 
+  // Computed in the clinic's timezone, not the browser/server's raw clock,
+  // so "today" lines up with the clinic's actual local calendar day.
   const today = new Date();
-  const isCurrentMonth =
-    today.getFullYear() === year && today.getMonth() + 1 === month;
+  const todayParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "numeric",
+  }).formatToParts(today);
+  const todayYear = parseInt(
+    todayParts.find((p) => p.type === "year")?.value ?? "0"
+  );
+  const todayMonth = parseInt(
+    todayParts.find((p) => p.type === "month")?.value ?? "0"
+  );
+  const isCurrentMonth = todayYear === year && todayMonth === month;
   const todayDay = getLocalDay(today.toISOString(), timezone);
 
   function navigate(dir: -1 | 1) {

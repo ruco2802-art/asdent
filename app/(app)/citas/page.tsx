@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile, Organization } from "@/lib/database.types";
 import { CalendarView } from "./_components/calendar-view";
+import { getDatePartsInTz } from "@/lib/agent/tools/_utils";
 
 // Force dynamic rendering — appointments change constantly (nueva cita por
 // WhatsApp puede llegar en cualquier momento) and this page must always
@@ -40,14 +41,17 @@ export default async function CitasPage({
   const org = rawOrg as Pick<Organization, "timezone"> | null;
   const timezone = org?.timezone ?? "America/Bogota";
 
-  const now = new Date();
+  // "Today" computed in the clinic's timezone, not the server's raw UTC
+  // clock — otherwise the default view can roll to the next month/day
+  // hours before it actually does in the clinic's local time.
+  const nowParts = getDatePartsInTz(new Date(), timezone);
   const year = Math.max(
     2020,
-    Math.min(2099, parseInt(params.year ?? "") || now.getFullYear())
+    Math.min(2099, parseInt(params.year ?? "") || nowParts.year)
   );
   const month = Math.max(
     1,
-    Math.min(12, parseInt(params.month ?? "") || now.getMonth() + 1)
+    Math.min(12, parseInt(params.month ?? "") || nowParts.month)
   );
 
   const startOfMonth = new Date(Date.UTC(year, month - 1, 1)).toISOString();

@@ -10,6 +10,7 @@ import {
 } from "@phosphor-icons/react/dist/ssr";
 import { createClient } from "@/lib/supabase/server";
 import type { Profile, Organization } from "@/lib/database.types";
+import { getWeekdayInTz, getDatePartsInTz, localToUTC } from "@/lib/agent/tools/_utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -108,19 +109,24 @@ export default async function DashboardPage() {
     .single();
   // DECISION: cast necesario — mismo patrón
   const org = rawOrg as Pick<Organization, "name" | "timezone"> | null;
+  const timezone = org?.timezone ?? "America/Bogota";
 
   // ── Date boundaries ──
+  // Computed in the clinic's own timezone, not the server's raw clock
+  // (Vercel runs in UTC) — otherwise "today" and "this week" roll over up
+  // to 5 hours before they actually do in the clinic's local time.
   const now = new Date();
   const last30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const last7 = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-  const dayOfWeek = (now.getDay() + 6) % 7; // Mon=0
-  const weekStart = new Date(now);
-  weekStart.setDate(now.getDate() - dayOfWeek);
-  weekStart.setHours(0, 0, 0, 0);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 6);
-  weekEnd.setHours(23, 59, 59, 999);
+  const WEEKDAY_INDEX: Record<string, number> = {
+    mon: 0, tue: 1, wed: 2, thu: 3, fri: 4, sat: 5, sun: 6,
+  };
+  const { year, month, day } = getDatePartsInTz(now, timezone);
+  const todayIndex = WEEKDAY_INDEX[getWeekdayInTz(now, timezone)] ?? 0;
+
+  const weekStart = localToUTC(year, month, day - todayIndex, 0, 0, timezone);
+  const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000 - 1);
 
   // ── Parallel KPI queries ──
   const [
@@ -190,7 +196,13 @@ export default async function DashboardPage() {
   });
 
   const firstName = profile?.full_name?.split(" ")[0] ?? "equipo";
-  const hour = now.getHours();
+  const hour = parseInt(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hour: "numeric",
+      hourCycle: "h23",
+    }).format(now)
+  );
   const greeting =
     hour < 12 ? "Buenos días" : hour < 18 ? "Buenas tardes" : "Buenas noches";
 
@@ -205,6 +217,7 @@ export default async function DashboardPage() {
           <p className="text-sm text-stone-400 mt-0.5">
             {org?.name ?? "Panel de control"} ·{" "}
             {now.toLocaleDateString("es-CO", {
+              timeZone: timezone,
               weekday: "long",
               year: "numeric",
               month: "long",
