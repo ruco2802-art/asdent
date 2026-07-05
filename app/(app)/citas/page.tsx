@@ -3,6 +3,11 @@ import { createClient } from "@/lib/supabase/server";
 import type { Profile, Organization } from "@/lib/database.types";
 import { CalendarView } from "./_components/calendar-view";
 
+// Force dynamic rendering — appointments change constantly (nueva cita por
+// WhatsApp puede llegar en cualquier momento) and this page must always
+// reflect the real state of the DB, never a cached render.
+export const dynamic = "force-dynamic";
+
 export default async function CitasPage({
   searchParams,
 }: {
