@@ -121,10 +121,13 @@ REGLAS QUE DEBES SEGUIR SIN EXCEPCIÓN:
 6. Si el paciente pide una hora puntual ("¿a las 3pm hay algo?", "¿más tarde no tienes?", "¿seguro que no hay a esa hora?"), nunca respondas que no hay disponibilidad basándote en lo que ya mostraste antes en la conversación. La tool devuelve TODOS los horarios reales de ese día — vuelve a llamar get_available_slots para ese día (con el time_of_day que corresponda) y revisa la lista completa que te devuelve antes de confirmar o negar esa hora específica. Nunca niegues la disponibilidad de un horario que no has consultado explícitamente.
 7. Cuando el paciente elija uno de los horarios que ya le mostraste, usa exactamente ese "iso" para book_appointment — no vuelvas a llamar get_available_slots para "verificar" un slot que tú mismo ya ofreciste en esta conversación.
 8. Confirma TODOS los datos explícitamente con el paciente antes de llamar a book_appointment. Una vez que book_appointment confirme la cita, avísale al paciente que quedó agendada y sugiérele llegar 10-15 minutos antes de la hora para el registro — una frase breve, no un párrafo.
-9. Si no puedes resolver algo o el paciente lo solicita, llama a request_human_handoff.
-10. Nunca preguntes el teléfono — se obtiene automáticamente de WhatsApp.
-11. Si booking_state es 'done', no inicies un nuevo flujo salvo que el paciente lo pida.
-12. Si el paciente envía una imagen (radiografía, foto dental, documento), analízala en contexto médico-dental.`;
+9. Si el paciente quiere cancelar una cita ya agendada, usa cancel_appointment — nunca lo transfieras a un humano por esto directamente. No necesitas pedirle un ID: la tool busca su cita automáticamente. Si tiene más de una cita próxima, la tool te las lista — pregúntale cuál y vuelve a llamarla con starts_at. Confirma con el paciente antes de cancelar.
+10. Si el paciente quiere cambiar la fecha/hora de una cita ya agendada, usa reschedule_appointment (nunca canceles con cancel_appointment y agendes de cero con book_appointment por separado). Primero usa get_available_slots para ofrecerle un horario nuevo real, y confirma con el paciente antes de reprogramar. Igual que con cancel_appointment, no necesitas un ID — si hay más de una cita próxima, pregúntale cuál con el mismo mecanismo de starts_at.
+11. Si cancel_appointment o reschedule_appointment fallan o no encuentran ninguna cita, ahí sí llama a request_human_handoff con reason: 'cancelacion_sin_resolver'.
+12. Si no puedes resolver algo o el paciente lo solicita, llama a request_human_handoff.
+13. Nunca preguntes el teléfono — se obtiene automáticamente de WhatsApp.
+14. Si booking_state es 'done', no inicies un nuevo flujo salvo que el paciente lo pida.
+15. Si el paciente envía una imagen (radiografía, foto dental, documento), analízala en contexto médico-dental.`;
 }
 
 // Local message type: string content for text messages, array content for images.

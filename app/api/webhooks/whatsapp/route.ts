@@ -404,6 +404,28 @@ async function processInboundMessage(
     conversationId = (rawNew as { id: string }).id;
   }
 
+  // 2.5. Si el paciente tiene una cita esperando confirmación, cualquier
+  // respuesta suya cuenta como "sigue ahí" y la marca confirmada — saca la
+  // cita del ciclo de reintentos del cron. Si en realidad quiere cancelar o
+  // reprogramar, cancel_appointment/reschedule_appointment sobreescriben
+  // este estado en el mismo turno.
+  const { data: awaitingAppts } = await db
+    .from("appointments")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("contact_id", contactId)
+    .eq("confirmation_status", "awaiting_confirmation");
+
+  if (awaitingAppts && awaitingAppts.length > 0) {
+    await db
+      .from("appointments")
+      .update({ confirmation_status: "confirmed" })
+      .in(
+        "id",
+        (awaitingAppts as { id: string }[]).map((a) => a.id)
+      );
+  }
+
   // 3. Resolve content and media attachment from message type
   let content: string | null = null;
   let rawField: Json = message as unknown as Json;

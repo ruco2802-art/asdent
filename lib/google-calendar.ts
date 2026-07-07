@@ -187,3 +187,26 @@ export async function createCalendarEvent(
   if (!event.id) throw new Error("Google Calendar createEvent: no event ID in response");
   return event.id;
 }
+
+// ─── Delete event ─────────────────────────────────────────────────────────────
+
+export async function deleteCalendarEvent(
+  accessToken: string,
+  calendarId: string,
+  eventId: string
+): Promise<void> {
+  const res = await fetch(
+    `${GOOGLE_CALENDAR_BASE}/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }
+  );
+
+  // 410 Gone means the event was already deleted (e.g. manually in Google
+  // Calendar) — treat as success rather than failing the cancellation.
+  if (!res.ok && res.status !== 404 && res.status !== 410) {
+    const errText = await res.text().catch(() => "unknown");
+    throw new Error(`Google Calendar deleteEvent ${res.status}: ${errText}`);
+  }
+}

@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import { createServiceClient } from "@/lib/supabase/service";
 import { sendWhatsAppMessage } from "@/lib/whatsapp/send";
+import { createAlert } from "@/lib/alerts";
 import type { AgentConfig } from "@/lib/database.types";
 
 interface HandoffContext {
@@ -13,18 +14,26 @@ interface HandoffContext {
 const DEFAULT_HANDOFF_MESSAGE =
   "Te comunico con un miembro de nuestro equipo en un momento. ¡Gracias por tu paciencia! 🙏";
 
+const REASON_LABELS: Record<string, string> = {
+  solicitado_por_paciente: "El paciente pidió hablar con una persona",
+  no_comprendo: "El agente no pudo resolver la solicitud",
+  urgencia_sin_slot: "Urgencia sin horario disponible",
+  cancelacion_sin_resolver: "Cancelación/reprogramación que cancel_appointment o reschedule_appointment no pudieron resolver",
+  otro: "Transferencia a humano",
+};
+
 export function createRequestHumanHandoffTool(ctx: HandoffContext) {
   const { organizationId, conversationId, waPhone } = ctx;
 
   return tool({
     description:
-      "Transfiere la conversación a un humano y desactiva el bot. Usar cuando el paciente lo solicite, cuando no puedas resolver algo, cuando no haya slots urgentes disponibles, o cuando solicite cancelar o reprogramar una cita existente.",
+      "Transfiere la conversación a un humano y desactiva el bot. Usar cuando el paciente lo solicite, cuando no puedas resolver algo, o cuando no haya slots urgentes disponibles. Para cancelar o reprogramar una cita existente usa cancel_appointment o reschedule_appointment primero — solo transfiere si esas tools fallan o no encuentran la cita.",
     inputSchema: z.object({
       reason: z
         .string()
         .optional()
         .describe(
-          "Razón de la transferencia: 'solicitado_por_paciente' | 'no_comprendo' | 'urgencia_sin_slot' | 'cancelacion_solicitada' | 'otro'"
+          "Razón de la transferencia: 'solicitado_por_paciente' | 'no_comprendo' | 'urgencia_sin_slot' | 'cancelacion_sin_resolver' | 'otro'"
         ),
     }),
     execute: async ({ reason = "otro" }) => {
@@ -70,6 +79,13 @@ export function createRequestHumanHandoffTool(ctx: HandoffContext) {
           created_at: new Date().toISOString(),
         });
       }
+
+      await createAlert({
+        organizationId,
+        type: "handoff_needed",
+        conversationId,
+        message: REASON_LABELS[reason] ?? REASON_LABELS.otro,
+      });
 
       return {
         ok: true,

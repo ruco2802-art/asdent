@@ -353,6 +353,9 @@ export interface Database {
           phone: string;
           notes: string | null;
           medical_notes: string | null;
+          confirmation_status: string;
+          confirmation_sent_at: string | null;
+          confirmation_attempts: number;
           created_at: string | null;
         };
         Insert: {
@@ -370,6 +373,9 @@ export interface Database {
           phone: string;
           notes?: string | null;
           medical_notes?: string | null;
+          confirmation_status?: string;
+          confirmation_sent_at?: string | null;
+          confirmation_attempts?: number;
           created_at?: string | null;
         };
         Update: {
@@ -387,6 +393,9 @@ export interface Database {
           phone?: string;
           notes?: string | null;
           medical_notes?: string | null;
+          confirmation_status?: string;
+          confirmation_sent_at?: string | null;
+          confirmation_attempts?: number;
           created_at?: string | null;
         };
         Relationships: [
@@ -400,6 +409,58 @@ export interface Database {
             foreignKeyName: "appointments_contact_id_fkey";
             columns: ["contact_id"];
             referencedRelation: "contacts";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      alerts: {
+        Row: {
+          id: string;
+          organization_id: string;
+          type: string;
+          conversation_id: string | null;
+          appointment_id: string | null;
+          message: string;
+          status: string;
+          created_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          type: string;
+          conversation_id?: string | null;
+          appointment_id?: string | null;
+          message: string;
+          status?: string;
+          created_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          type?: string;
+          conversation_id?: string | null;
+          appointment_id?: string | null;
+          message?: string;
+          status?: string;
+          created_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "alerts_organization_id_fkey";
+            columns: ["organization_id"];
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "alerts_conversation_id_fkey";
+            columns: ["conversation_id"];
+            referencedRelation: "conversations";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "alerts_appointment_id_fkey";
+            columns: ["appointment_id"];
+            referencedRelation: "appointments";
             referencedColumns: ["id"];
           },
         ];
@@ -435,3 +496,4 @@ export type Contact = Tables<"contacts">;
 export type Conversation = Tables<"conversations">;
 export type Message = Tables<"messages">;
 export type Appointment = Tables<"appointments">;
+export type Alert = Tables<"alerts">;
