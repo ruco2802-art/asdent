@@ -112,8 +112,10 @@ function initBusinessInfo(raw: unknown): BusinessInfo {
 
 export function PersonalizacionForm({
   initialConfig,
+  initialNotificationPhone,
 }: {
   initialConfig: AgentConfig | null;
+  initialNotificationPhone: string | null;
 }) {
   // ── Form state ──
   const [systemPrompt, setSystemPrompt] = useState(
@@ -142,6 +144,9 @@ export function PersonalizacionForm({
     initialConfig?.confirmation_template ??
       "Tu cita ha sido confirmada para el {fecha} a las {hora}. Recuerda llegar 10 minutos antes."
   );
+  const [notificationPhone, setNotificationPhone] = useState(
+    initialNotificationPhone ?? ""
+  );
 
   // ── Save state ──
   const [isSaving, setIsSaving] = useState(false);
@@ -169,6 +174,7 @@ export function PersonalizacionForm({
     fd.set("assistant_name", assistantName);
     fd.set("handoff_message", handoffMsg);
     fd.set("confirmation_template", confirmTpl);
+    fd.set("notification_phone", notificationPhone);
     fd.set("business_info", JSON.stringify(businessInfo));
     fd.set(
       "services",
@@ -513,6 +519,19 @@ export function PersonalizacionForm({
           />
           <p className="text-xs text-stone-400 mt-1">
             Variables disponibles: {"{fecha}"}, {"{hora}"}, {"{servicio}"}
+          </p>
+        </Field>
+        <Field label="WhatsApp para notificaciones al administrador" className="mt-4">
+          <input
+            type="text"
+            value={notificationPhone}
+            onChange={(e) => setNotificationPhone(e.target.value)}
+            className={inputCls}
+            placeholder="+57 300 000 0000"
+          />
+          <p className="text-xs text-stone-400 mt-1">
+            Recibirás un WhatsApp cuando una conversación necesite atención
+            humana o una cita esté en riesgo de no confirmarse.
           </p>
         </Field>
       </Section>

@@ -19,6 +19,7 @@ export interface Database {
           slug: string;
           timezone: string;
           business_type: string;
+          notification_phone: string | null;
           created_at: string | null;
         };
         Insert: {
@@ -27,6 +28,7 @@ export interface Database {
           slug: string;
           timezone?: string;
           business_type?: string;
+          notification_phone?: string | null;
           created_at?: string | null;
         };
         Update: {
@@ -35,6 +37,7 @@ export interface Database {
           slug?: string;
           timezone?: string;
           business_type?: string;
+          notification_phone?: string | null;
           created_at?: string | null;
         };
         Relationships: [];

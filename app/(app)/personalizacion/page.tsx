@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { Profile, AgentConfig } from "@/lib/database.types";
+import type { Profile, AgentConfig, Organization } from "@/lib/database.types";
 import { PersonalizacionForm } from "./_components/personalizacion-form";
 
 export default async function PersonalizacionPage() {
@@ -28,13 +28,24 @@ export default async function PersonalizacionPage() {
   // DECISION: cast necesario — mismo patrón
   const config = rawConfig as AgentConfig | null;
 
+  const { data: rawOrg } = await supabase
+    .from("organizations")
+    .select("notification_phone")
+    .eq("id", organizationId)
+    .maybeSingle();
+  // DECISION: cast necesario — mismo patrón
+  const org = rawOrg as Pick<Organization, "notification_phone"> | null;
+
   return (
     <div className="p-6 h-full overflow-y-auto">
       <div className="max-w-3xl mx-auto">
         <h1 className="text-xl font-semibold text-slate-900 mb-6">
           Personalización del agente
         </h1>
-        <PersonalizacionForm initialConfig={config} />
+        <PersonalizacionForm
+          initialConfig={config}
+          initialNotificationPhone={org?.notification_phone ?? null}
+        />
       </div>
     </div>
   );

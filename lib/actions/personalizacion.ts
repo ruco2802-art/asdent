@@ -35,6 +35,8 @@ export async function saveAgentConfigAction(
     (formData.get("handoff_message") as string)?.trim() || null;
   const confirmation_template =
     (formData.get("confirmation_template") as string)?.trim() || null;
+  const notification_phone =
+    (formData.get("notification_phone") as string)?.trim() || null;
 
   // DECISION: JSON.parse retorna unknown; cast a Json para compatibilidad con tipos Supabase
   let business_info: Json = {};
@@ -74,5 +76,13 @@ export async function saveAgentConfigAction(
   );
 
   if (error) return { error: "Error al guardar la configuración" };
+
+  const { error: orgError } = await service
+    .from("organizations")
+    .update({ notification_phone })
+    .eq("id", orgId);
+
+  if (orgError) return { error: "Error al guardar el teléfono de notificaciones" };
+
   return {};
 }
