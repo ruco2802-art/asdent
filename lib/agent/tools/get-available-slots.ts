@@ -24,6 +24,11 @@ function isSlotBusy(
 type TimeOfDay = "mañana" | "tarde";
 const NOON_MIN = 12 * 60;
 
+// Días distintos y slots por día que se juntan en modo "overview" (pregunta
+// abierta sobre disponibilidad, sin un día puntual en mente).
+const OVERVIEW_DAYS = 3;
+const OVERVIEW_SLOTS_PER_DAY = 2;
+
 function generateSlots(
   businessHours: BusinessHours,
   durationMin: number,
@@ -31,13 +36,17 @@ function generateSlots(
   timezone: string,
   isUrgent: boolean,
   now: Date,
-  timeOfDay?: TimeOfDay
+  timeOfDay?: TimeOfDay,
+  overview?: boolean
 ): string[] {
   // Urgent = look 2 days (~48h) at most to find the single soonest slot
   const maxDays = isUrgent ? 2 : daysAhead;
   const urgentCutoff = now.getTime() + 24 * 60 * 60 * 1000;
   // 30-min buffer so we never offer a slot that starts in the next 30 minutes
   const earliest = now.getTime() + 30 * 60 * 1000;
+
+  const overviewSlots: string[] = [];
+  let daysWithSlots = 0;
 
   for (let d = 0; d < maxDays; d++) {
     const dayStart = new Date(now.getTime() + d * 24 * 60 * 60 * 1000);
@@ -75,22 +84,30 @@ function generateSlots(
       if (isUrgent && daySlots.length > 0) break;
     }
 
-    // Return every slot of the FIRST day that has any availability in the
-    // requested window — not an arbitrary cap. Capping at a fixed number
-    // (previously 3) meant the earliest slots of a long business day always
-    // won, so a patient asking for 3pm could never be told the truth once
-    // the day's first 3 half-hour slots (always in the morning) filled the
-    // quota. If this day has nothing, keep looking at subsequent days.
-    if (daySlots.length > 0) return daySlots;
+    if (daySlots.length === 0) continue;
+
+    if (!overview) {
+      // Modo normal: TODOS los slots del primer día con disponibilidad — no
+      // un cap arbitrario (ver commit anterior: eso rompía la verificación
+      // de horas puntuales). Si este día no tiene nada, sigue buscando.
+      return daySlots;
+    }
+
+    // Modo overview: un par de horarios de este día, y seguir a otros días
+    // hasta juntar OVERVIEW_DAYS días distintos — para responder "¿qué días
+    // tienes?" con un panorama real en vez de un solo día a la vez.
+    overviewSlots.push(...daySlots.slice(0, OVERVIEW_SLOTS_PER_DAY));
+    daysWithSlots++;
+    if (daysWithSlots >= OVERVIEW_DAYS) return overviewSlots;
   }
 
-  return [];
+  return overviewSlots;
 }
 
 export function createGetAvailableSlotsTool(organizationId: string) {
   return tool({
     description:
-      "Devuelve TODOS los slots de tiempo disponibles del primer día con disponibilidad dentro de la ventana solicitada, filtrando con Google Calendar FreeBusy si está configurado. Si is_urgent=true devuelve solo el slot más próximo en 24h. Cada slot incluye un 'label' en español ya formateado — úsalo directamente, no calcules el día de la semana tú mismo. Si el paciente pidió una fecha exacta, usa preferred_date en vez de skip_days. Si el paciente prefiere mañana o tarde, usa time_of_day. Como devuelve la lista completa del día, puedes verificar con certeza si una hora específica que pida el paciente (ej. '¿a las 3pm hay?') está o no en el resultado — nunca respondas que no hay disponibilidad sin haber consultado esta tool para esa hora exacta.",
+      "Devuelve slots de tiempo disponibles, filtrando con Google Calendar FreeBusy si está configurado. Por defecto devuelve TODOS los horarios del primer día con disponibilidad dentro de la ventana solicitada. Si is_urgent=true devuelve solo el slot más próximo en 24h. Si overview=true devuelve un par de horarios de cada uno de 2-3 días distintos, para responder preguntas abiertas tipo '¿qué días tienes?'. Cada slot incluye un 'label' en español ya formateado — úsalo directamente, no calcules el día de la semana tú mismo. Si el paciente pidió una fecha exacta, usa preferred_date en vez de skip_days. Si el paciente prefiere mañana o tarde, usa time_of_day. En modo normal (no overview), como devuelve la lista completa del día, puedes verificar con certeza si una hora específica que pida el paciente (ej. '¿a las 3pm hay?') está o no en el resultado — nunca respondas que no hay disponibilidad sin haber consultado esta tool para esa hora exacta.",
     inputSchema: z.object({
       service: z.string().describe("Nombre del servicio a agendar"),
       days_ahead: z
@@ -119,7 +136,13 @@ export function createGetAvailableSlotsTool(organizationId: string) {
         .enum(["mañana", "tarde"])
         .optional()
         .describe(
-          "Si el paciente prefiere mañana o tarde, fíltralo aquí. Sin esto, la tool solo devuelve los 3 horarios más tempranos del día (que casi siempre caen en la mañana) — usar time_of_day es la única forma de encontrar horarios de tarde en un día con jornada larga."
+          "Si el paciente prefiere mañana o tarde, fíltralo aquí. Sin esto, en modo normal la tool solo devuelve los horarios del día que casi siempre caen en la mañana — usar time_of_day es la única forma de encontrar horarios de tarde en un día con jornada larga."
+        ),
+      overview: z
+        .boolean()
+        .optional()
+        .describe(
+          "Ponlo en true cuando el paciente haga una pregunta ABIERTA sobre disponibilidad, sin pedir un día puntual (ej. '¿qué días tienes disponibilidad?', 'dime tú qué días tienes'). Devuelve un par de horarios de cada uno de varios días distintos en vez de un solo día — así no tienes que repetir el mismo día una y otra vez esperando que el paciente insista."
         ),
     }),
     execute: async ({
@@ -129,6 +152,7 @@ export function createGetAvailableSlotsTool(organizationId: string) {
       skip_days = 0,
       preferred_date,
       time_of_day,
+      overview = false,
     }) => {
       const db = createServiceClient();
 
@@ -189,7 +213,8 @@ export function createGetAvailableSlotsTool(organizationId: string) {
         timezone,
         is_urgent,
         now,
-        time_of_day
+        time_of_day,
+        overview
       );
 
       // Filter by Google Calendar FreeBusy if the org has it configured
