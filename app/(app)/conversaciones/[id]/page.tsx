@@ -3,6 +3,11 @@ import { createClient } from "@/lib/supabase/server";
 import type { Profile, Json } from "@/lib/database.types";
 import { ConversationDetail } from "../_components/conversation-detail";
 
+// Force dynamic rendering — mismo motivo que en el layout de /conversaciones
+// y en /citas (commit b29cec5): los mensajes nuevos deben verse siempre,
+// nunca un render en caché de una carga anterior.
+export const dynamic = "force-dynamic";
+
 export default async function ConversacionDetallePage({
   params,
 }: {
@@ -48,22 +53,28 @@ export default async function ConversacionDetallePage({
     contacts: { id: string; wa_phone: string; full_name: string | null } | null;
   };
 
-  // Fetch last 50 messages ordered oldest-first for chronological display
+  // Fetch the most recent 50 (descending), then reverse to chronological
+  // order for display. ascending+limit(50) would instead return the OLDEST
+  // 50 messages, permanently hiding new ones once a conversation passes 50
+  // messages — same bug class already fixed in fetchMessageHistory
+  // (lib/agent/run.ts, commit 250f67a) but never applied here.
   const { data: rawMessages } = await supabase
     .from("messages")
     .select("id, direction, sender, content, created_at")
     .eq("conversation_id", id)
-    .order("created_at", { ascending: true })
+    .order("created_at", { ascending: false })
     .limit(50);
 
   // DECISION: cast necesario — supabase-js@2.49.9 infiere never para select parcial con tipos manuales
-  const messages = (rawMessages ?? []) as Array<{
-    id: string;
-    direction: string;
-    sender: string;
-    content: string | null;
-    created_at: string | null;
-  }>;
+  const messages = (
+    (rawMessages ?? []) as Array<{
+      id: string;
+      direction: string;
+      sender: string;
+      content: string | null;
+      created_at: string | null;
+    }>
+  ).reverse();
 
   return (
     <ConversationDetail

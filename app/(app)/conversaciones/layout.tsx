@@ -3,6 +3,11 @@ import { createClient } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/database.types";
 import { ConversationsShell } from "./_components/conversations-shell";
 
+// Force dynamic rendering — nuevos mensajes llegan por WhatsApp en cualquier
+// momento y esta lista debe reflejar el estado real de la BD en cada carga,
+// nunca un render en caché (mismo patrón que /citas, ver commit b29cec5).
+export const dynamic = "force-dynamic";
+
 export default async function ConversacionesLayout({
   children,
 }: {
