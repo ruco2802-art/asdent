@@ -22,6 +22,13 @@ export function getConfirmationTemplateName(): string | null {
   return process.env.WHATSAPP_CONFIRMATION_TEMPLATE_NAME || null;
 }
 
+// Configurable porque el código de idioma exacto que Meta ofrece al crear la
+// plantilla puede no ser "es_CO" (a veces solo hay "es" genérico, o "es_LA")
+// — así no hace falta un cambio de código si no coincide.
+export function getConfirmationTemplateLanguage(): string {
+  return process.env.WHATSAPP_CONFIRMATION_TEMPLATE_LANG || "es_CO";
+}
+
 /**
  * Envía un mensaje de plantilla (template) pre-aprobado por Meta.
  *

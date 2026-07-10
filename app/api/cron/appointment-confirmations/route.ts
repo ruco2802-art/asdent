@@ -1,7 +1,11 @@
 import type { NextRequest } from "next/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { createAlert } from "@/lib/alerts";
-import { sendWhatsAppTemplate, getConfirmationTemplateName } from "@/lib/whatsapp/send-template";
+import {
+  sendWhatsAppTemplate,
+  getConfirmationTemplateName,
+  getConfirmationTemplateLanguage,
+} from "@/lib/whatsapp/send-template";
 import type { Organization } from "@/lib/database.types";
 
 export const runtime = "nodejs";
@@ -137,7 +141,7 @@ export async function GET(request: NextRequest) {
       appt.organization_id,
       appt.phone,
       templateName,
-      "es_CO",
+      getConfirmationTemplateLanguage(),
       [appt.full_name.split(" ")[0], dateLabel]
     );
 
