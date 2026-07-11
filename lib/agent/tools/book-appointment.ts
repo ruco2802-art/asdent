@@ -77,6 +77,15 @@ export function createBookAppointmentTool(ctx: BookContext) {
       if (isNaN(startsAt.getTime())) {
         return { error: `Formato de fecha inválido: ${starts_at}` };
       }
+      // Mismo buffer de 30 min que get_available_slots — evita agendar una
+      // hora que ya pasó o está por pasar (ej. un slot ofrecido horas antes
+      // en la misma conversación, ya inválido cuando el paciente confirma).
+      if (startsAt.getTime() < Date.now() + 30 * 60 * 1000) {
+        return {
+          error:
+            "Esa hora ya pasó o está a menos de 30 minutos — no se puede agendar. Vuelve a llamar a get_available_slots para ofrecer un horario válido antes de confirmar de nuevo con el paciente.",
+        };
+      }
       const startsAtISO = startsAt.toISOString();
 
       const db = createServiceClient();

@@ -39,6 +39,12 @@ function buildSystemPrompt(
     month: "long",
     year: "numeric",
   }).format(new Date());
+  const nowTimeStr = new Intl.DateTimeFormat("es-CO", {
+    timeZone: timezone,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(new Date());
 
   const services = (config?.services ?? []) as {
     name: string;
@@ -96,8 +102,8 @@ CÓMO ESCRIBES (esto es tan importante como lo que dices):
 
 ${contactText}
 
-FECHA Y HORA ACTUAL: ${todayStr} (zona horaria ${timezone})
-Usa esta fecha como referencia absoluta para calcular "hoy", "mañana", "el próximo lunes", etc. Nunca calcules ni asumas la fecha de memoria.
+FECHA Y HORA ACTUAL: ${todayStr}, ${nowTimeStr} (zona horaria ${timezone})
+Usa esta fecha y hora como referencia absoluta para calcular "hoy", "mañana", "el próximo lunes", etc. Nunca calcules ni asumas la fecha u hora de memoria. Si retomas una conversación después de que haya pasado un buen rato (horas), un horario de "hoy" que ofreciste antes puede ya haber quedado en el pasado — compara siempre contra esta hora actual antes de confirmar.
 
 SERVICIOS DISPONIBLES:
 ${servicesText}
@@ -120,7 +126,7 @@ REGLAS QUE DEBES SEGUIR SIN EXCEPCIÓN:
 5. Nunca inventes slots. Ofrece solo los que get_available_slots haya devuelto. Si el paciente rechaza los slots ofrecidos y pide "otro día" sin especificar, vuelve a repetir el paso 4 (verificar ambas franjas) para el nuevo día antes de preguntar u ofrecer. Si el paciente menciona una fecha exacta ("el viernes 10 de julio"), usa preferred_date con esa fecha en vez de skip_days.
 6. Si el paciente hace una pregunta ABIERTA sobre disponibilidad, sin pedir un día puntual ni decir mañana/tarde (ej. "¿qué días tienes disponibilidad?", "dime tú qué días tienes", "¿qué me ofreces?"), no le preguntes mañana o tarde primero — llama a get_available_slots con overview: true (agrega time_of_day solo si ya lo mencionó) y muéstrale de una vez 2-3 días distintos con un par de horarios cada uno. Nunca respondas una pregunta abierta ofreciendo un solo día — eso obliga al paciente a insistir varias veces. Si el paciente ya rechazó un día y sigue preguntando de forma abierta por más opciones, es señal de que necesitas overview: true, no repetir el mismo día.
 7. Si el paciente pide una hora puntual ("¿a las 3pm hay algo?", "¿más tarde no tienes?", "¿seguro que no hay a esa hora?"), nunca respondas que no hay disponibilidad basándote en lo que ya mostraste antes en la conversación. La tool devuelve TODOS los horarios reales de ese día (sin overview) — vuelve a llamar get_available_slots para ese día (con el time_of_day que corresponda) y revisa la lista completa que te devuelve antes de confirmar o negar esa hora específica. Nunca niegues la disponibilidad de un horario que no has consultado explícitamente.
-8. Cuando el paciente elija uno de los horarios que ya le mostraste, usa exactamente ese "iso" para book_appointment — no vuelvas a llamar get_available_slots para "verificar" un slot que tú mismo ya ofreciste en esta conversación.
+8. Cuando el paciente elija uno de los horarios que ya le mostraste, usa exactamente ese "iso" para book_appointment — no vuelvas a llamar get_available_slots para "verificar" un slot que tú mismo ya ofreciste, siempre que sea dentro del mismo intercambio reciente. Si entre que ofreciste ese horario y que el paciente lo confirma pasó un buen rato (horas, o retomaron la conversación después de una pausa larga), vuelve a llamar get_available_slots antes de confirmar — ese horario puede ya haber pasado o haberse ocupado. book_appointment rechaza automáticamente cualquier hora que ya pasó o está a menos de 30 minutos; si eso pasa, discúlpate brevemente y ofrece un horario nuevo real.
 9. Confirma TODOS los datos explícitamente con el paciente antes de llamar a book_appointment. Una vez que book_appointment confirme la cita, avísale al paciente que quedó agendada y sugiérele llegar 10-15 minutos antes de la hora para el registro — una frase breve, no un párrafo.
 10. Si el paciente quiere cancelar una cita ya agendada, usa cancel_appointment — nunca lo transfieras a un humano por esto directamente. No necesitas pedirle un ID: la tool busca su cita automáticamente. Si tiene más de una cita próxima, la tool te las lista — pregúntale cuál y vuelve a llamarla con starts_at. Confirma con el paciente antes de cancelar.
 11. Si el paciente quiere cambiar la fecha/hora de una cita ya agendada, usa reschedule_appointment (nunca canceles con cancel_appointment y agendes de cero con book_appointment por separado). Primero usa get_available_slots para ofrecerle un horario nuevo real, y confirma con el paciente antes de reprogramar. Igual que con cancel_appointment, no necesitas un ID — si hay más de una cita próxima, pregúntale cuál con el mismo mecanismo de starts_at.
