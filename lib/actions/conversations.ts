@@ -1,8 +1,11 @@
 "use server";
 
+import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { sendWhatsAppMessage } from "@/lib/whatsapp/send";
+import { runAgent } from "@/lib/agent/run";
+import type { Json } from "@/lib/database.types";
 
 export async function toggleBotAction(
   formData: FormData
@@ -43,7 +46,55 @@ export async function toggleBotAction(
     .eq("organization_id", organizationId);
 
   if (error) return { error: "Error al actualizar el bot" };
+
+  // Al reactivar, si el último mensaje es del paciente (nadie — ni el bot ni
+  // un humano — respondió mientras estuvo desactivado), procesarlo de una
+  // vez. Sin esto, el agente se queda en silencio indefinidamente esperando
+  // un mensaje NUEVO del paciente, dejando sin respuesta lo que ya escribió
+  // durante la intervención humana.
+  if (botActive) {
+    after(() => resumePendingConversation(conversationId, organizationId, service));
+  }
+
   return {};
+}
+
+async function resumePendingConversation(
+  conversationId: string,
+  organizationId: string,
+  service: ReturnType<typeof createServiceClient>
+): Promise<void> {
+  const { data: rawLastMsg } = await service
+    .from("messages")
+    .select("direction")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const lastMsg = rawLastMsg as { direction: string } | null;
+  if (lastMsg?.direction !== "inbound") return; // ya fue respondido
+
+  const { data: rawConv } = await service
+    .from("conversations")
+    .select("contact_id, booking_state, booking_data, contacts(wa_phone)")
+    .eq("id", conversationId)
+    .maybeSingle();
+  const conv = rawConv as {
+    contact_id: string;
+    booking_state: string | null;
+    booking_data: Json | null;
+    contacts: { wa_phone: string } | null;
+  } | null;
+  if (!conv?.contacts?.wa_phone) return;
+
+  await runAgent({
+    organizationId,
+    contactId: conv.contact_id,
+    conversationId,
+    waPhone: conv.contacts.wa_phone,
+    bookingState: conv.booking_state,
+    bookingData: conv.booking_data,
+  });
 }
 
 export async function sendHumanMessageAction(
