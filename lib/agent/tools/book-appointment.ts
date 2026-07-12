@@ -6,13 +6,56 @@ import {
   createCalendarEvent,
 } from "@/lib/google-calendar";
 import type { AgentConfig, Organization, Json } from "@/lib/database.types";
-import { type ServiceConfig, getServiceDuration } from "./_utils";
+import {
+  type ServiceConfig,
+  type BusinessHours,
+  getServiceDuration,
+  getWeekdayInTz,
+} from "./_utils";
 
 interface BookContext {
   organizationId: string;
   contactId: string;
   conversationId: string;
   waPhone: string;
+}
+
+function localMinutesOfDay(date: Date, tz: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hour: "numeric",
+    minute: "numeric",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const get = (t: string) => parseInt(parts.find((p) => p.type === t)?.value ?? "0");
+  return get("hour") * 60 + get("minute");
+}
+
+// Defensa server-side independiente del LLM: si el modelo reconstruye una
+// hora de memoria en vez de reutilizar el "iso" exacto de get_available_slots
+// (ej. tras una llamada redundante a book_appointment), puede calcular mal el
+// offset de zona horaria y terminar con una hora fuera de servicio (visto en
+// producción: 8:00 a.m. local mal escrito como 08:00 UTC = 3:00 a.m. local).
+// Esta validación bloquea eso sin importar cómo se produjo el error.
+function isWithinBusinessHours(
+  startsAt: Date,
+  endsAt: Date,
+  businessHours: BusinessHours,
+  timezone: string
+): boolean {
+  const weekday = getWeekdayInTz(startsAt, timezone);
+  const periods = businessHours[weekday] ?? [];
+  const startMinutes = localMinutesOfDay(startsAt, timezone);
+  const endMinutes =
+    startMinutes + (endsAt.getTime() - startsAt.getTime()) / 60000;
+
+  return periods.some((p) => {
+    const [sh, sm] = p.start.split(":").map(Number);
+    const [eh, em] = p.end.split(":").map(Number);
+    const periodStart = sh * 60 + (sm ?? 0);
+    const periodEnd = eh * 60 + (em ?? 0);
+    return startMinutes >= periodStart && endMinutes <= periodEnd;
+  });
 }
 
 export function createBookAppointmentTool(ctx: BookContext) {
@@ -104,6 +147,18 @@ export function createBookAppointmentTool(ctx: BookContext) {
       const durationMin = getServiceDuration(service, services);
 
       const endsAt = new Date(startsAt.getTime() + durationMin * 60 * 1000);
+
+      // DECISION: double cast (unknown) necesario — Json no es directamente asignable a BusinessHours
+      const businessHours = (config?.business_hours ?? {}) as unknown as BusinessHours;
+      if (
+        Object.keys(businessHours).length > 0 &&
+        !isWithinBusinessHours(startsAt, endsAt, businessHours, timezone)
+      ) {
+        return {
+          error:
+            "Esa hora está fuera del horario de atención de la clínica — no se puede agendar. Vuelve a llamar a get_available_slots para ofrecer un horario real dentro de horario antes de confirmar de nuevo con el paciente.",
+        };
+      }
 
       // Idempotency: same contact + same start time
       const { data: existing } = await db
