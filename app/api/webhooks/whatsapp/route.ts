@@ -7,6 +7,7 @@ import { runAgent, type ImageAttachment } from "@/lib/agent/run";
 import { downloadMetaMedia } from "@/lib/media/download";
 import { transcribeAudio } from "@/lib/media/transcribe";
 import { extractPdfText } from "@/lib/media/extract-pdf";
+import { isEmergencyMessage, generateEmergencyAck } from "@/lib/agent/emergency-ack";
 import { sendWhatsAppMessage } from "@/lib/whatsapp/send";
 import type { WhatsappConfig, Json } from "@/lib/database.types";
 
@@ -298,6 +299,54 @@ async function sendFallback(
   }
 }
 
+interface PendingAck {
+  text: string;
+  wamid: string;
+  createdAt: string;
+}
+
+// Genera y envía el reconocimiento empático de una emergencia dental, pero
+// NO lo inserta en `messages` todavía — eso pasa después de que runAgent
+// termine (ver step 5.5), para que fetchMessageHistory (que corre al inicio
+// de runAgent) siga viendo la conversación terminando en el turno del
+// paciente, como exige la API de Claude. El created_at se captura aquí para
+// que, al insertarse más tarde, el orden cronológico en la UI quede
+// correcto (paciente -> empatía -> horario).
+async function sendEmergencyAck(
+  organizationId: string,
+  waPhone: string,
+  patientMessage: string,
+  db: ReturnType<typeof createServiceClient>
+): Promise<PendingAck | null> {
+  try {
+    const { data: rawConfig } = await db
+      .from("agent_configs")
+      .select("assistant_name, business_info")
+      .eq("organization_id", organizationId)
+      .maybeSingle();
+    const config = rawConfig as
+      | { assistant_name: string | null; business_info: Json | null }
+      | null;
+    const assistantName = config?.assistant_name?.trim() || "Valentina";
+    const businessInfo = (config?.business_info ?? {}) as { name?: string };
+    const clinicName = businessInfo.name?.trim() || "la clínica";
+
+    const createdAt = new Date().toISOString();
+    const text = await generateEmergencyAck(patientMessage, assistantName, clinicName);
+    const wamid = await sendWhatsAppMessage(organizationId, waPhone, text);
+    return { text, wamid, createdAt };
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        event: "emergency_ack_error",
+        organization_id: organizationId,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    );
+    return null; // best-effort — no bloquea el flujo normal del agente
+  }
+}
+
 // ─── Inbound message processing ───────────────────────────────────────────────
 
 async function processInboundMessage(
@@ -519,6 +568,15 @@ async function processInboundMessage(
   if (insertErr === "duplicate") return; // already processed
   if (insertErr === "error") return;
 
+  // 4.5. Emergencia/trauma dental detectada por palabras clave — se envía un
+  // reconocimiento empático aparte, antes de que el flujo normal del agente
+  // ofrezca un horario (ver comentario en sendEmergencyAck sobre por qué el
+  // insert en `messages` se difiere hasta después de runAgent).
+  let pendingAck: PendingAck | null = null;
+  if (botActive && content && isEmergencyMessage(content)) {
+    pendingAck = await sendEmergencyAck(organizationId, waPhone, content, db);
+  }
+
   // 5. Log + invoke agent
   console.log(
     JSON.stringify({
@@ -534,41 +592,59 @@ async function processInboundMessage(
     })
   );
 
-  const hasContent = !!content || !!imageAttachment;
-  if (botActive && hasContent) {
-    // Debounce: wait until last_message_at has been quiet for DEBOUNCE_MS so
-    // rapid consecutive messages from the same patient get batched into a
-    // single agent turn instead of racing each other. Every concurrent
-    // invocation converges on the same final last_message_at value; only the
-    // one whose own write matches it is the leader and proceeds.
-    const finalTimestamp = await waitForQuiet(conversationId, db);
+  try {
+    const hasContent = !!content || !!imageAttachment;
+    if (botActive && hasContent) {
+      // Debounce: wait until last_message_at has been quiet for DEBOUNCE_MS so
+      // rapid consecutive messages from the same patient get batched into a
+      // single agent turn instead of racing each other. Every concurrent
+      // invocation converges on the same final last_message_at value; only the
+      // one whose own write matches it is the leader and proceeds.
+      const finalTimestamp = await waitForQuiet(conversationId, db);
 
-    // Compare as epoch ms, not raw strings — Postgres/Supabase returns
-    // timestamptz as "...+00:00" while Date#toISOString() produces "...Z".
-    // Same instant, different string, so a naive !== always mismatched.
-    if (
-      !finalTimestamp ||
-      new Date(finalTimestamp).getTime() !== new Date(myTimestamp).getTime()
-    ) {
-      console.log(
-        JSON.stringify({
-          event: "debounced_skip",
-          conversation_id: conversationId,
-          wa_message_id: waMessageId,
-        })
-      );
-      return;
+      // Compare as epoch ms, not raw strings — Postgres/Supabase returns
+      // timestamptz as "...+00:00" while Date#toISOString() produces "...Z".
+      // Same instant, different string, so a naive !== always mismatched.
+      if (
+        !finalTimestamp ||
+        new Date(finalTimestamp).getTime() !== new Date(myTimestamp).getTime()
+      ) {
+        console.log(
+          JSON.stringify({
+            event: "debounced_skip",
+            conversation_id: conversationId,
+            wa_message_id: waMessageId,
+          })
+        );
+        return;
+      }
+
+      await runAgent({
+        organizationId,
+        contactId,
+        conversationId,
+        waPhone,
+        bookingState,
+        bookingData,
+        imageAttachment,
+      });
     }
-
-    await runAgent({
-      organizationId,
-      contactId,
-      conversationId,
-      waPhone,
-      bookingState,
-      bookingData,
-      imageAttachment,
-    });
+  } finally {
+    // Insertar el ack de emergencia (si se generó en 4.5) siempre al final,
+    // después de que runAgent ya haya leído el historial — nunca antes, o
+    // fetchMessageHistory vería la conversación terminando en un turno
+    // "assistant" y rompería el requisito de Claude de terminar en "user".
+    if (pendingAck) {
+      await db.from("messages").insert({
+        conversation_id: conversationId,
+        organization_id: organizationId,
+        wa_message_id: pendingAck.wamid,
+        direction: "outbound",
+        sender: "bot",
+        content: pendingAck.text,
+        created_at: pendingAck.createdAt,
+      });
+    }
   }
 }
 
