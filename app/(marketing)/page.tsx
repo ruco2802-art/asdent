@@ -16,12 +16,8 @@ export default function LandingPage() {
       {/* ── Nav ──────────────────────────────────────────────── */}
       <header className="sticky top-0 z-30 bg-stone-50/90 backdrop-blur border-b border-stone-200">
         <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="w-7 h-7 rounded-lg bg-teal-700 flex items-center justify-center">
-              <Robot size={15} weight="fill" className="text-white" />
-            </span>
-            <span className="font-semibold text-slate-900 tracking-tight">ASDent</span>
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element -- SVG estático, sin next/image en el resto del proyecto */}
+          <img src="/asdent-logo.svg" alt="ASDent" className="h-6 w-auto" />
           <div className="flex items-center gap-3">
             <Link
               href="/login"
@@ -49,35 +45,45 @@ export default function LandingPage() {
 
         {/* Headline */}
         <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight text-slate-900 leading-tight max-w-3xl mx-auto">
-          Tu clínica dental atiende y agenda{" "}
-          <span className="text-teal-700">sola, las 24 horas</span>
+          Llena tu agenda de pacientes sin levantar el teléfono
         </h1>
 
         <p className="mt-6 text-lg text-stone-500 max-w-xl mx-auto leading-relaxed">
-          Un agente de inteligencia artificial gestiona las conversaciones de
-          WhatsApp, agenda citas en Google Calendar y detecta urgencias —
-          sin intervención humana.
+          Asdent gestiona tus citas por WhatsApp, confirma asistencias y
+          reduce el ausentismo en tu clínica, 24/7.
         </p>
 
         <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-3">
-          <Link
-            href="/signup"
+          <a
+            href="https://wa.me/573118372701?text=Hola%2C%20quiero%20ver%20c%C3%B3mo%20funciona%20Asdent"
+            target="_blank"
+            rel="noopener noreferrer"
             className="flex items-center gap-2 bg-teal-700 text-white font-semibold px-7 py-3 rounded-xl hover:bg-teal-800 transition-colors text-sm shadow-sm shadow-teal-900/10"
           >
-            Crear cuenta gratis
-            <ArrowRight size={15} weight="bold" />
-          </Link>
+            <WhatsappLogo size={16} weight="fill" />
+            Ver Asdent en acción
+          </a>
           <Link
-            href="/login"
+            href="/signup"
             className="flex items-center gap-2 border border-stone-300 text-slate-700 font-medium px-7 py-3 rounded-xl hover:bg-white hover:border-stone-400 transition-colors text-sm"
           >
-            Iniciar sesión
+            Crear cuenta gratis
           </Link>
         </div>
 
+        <p className="mt-5">
+          <Link
+            href="/login"
+            className="text-xs text-stone-400 hover:text-slate-600 hover:underline transition-colors"
+          >
+            Iniciar sesión
+          </Link>
+        </p>
+
         {/* Social proof strip */}
-        <p className="mt-8 text-xs text-stone-400">
-          Sin tarjeta de crédito · Configuración en menos de 15 minutos · Cancela cuando quieras
+        <p className="mt-6 text-xs text-stone-400">
+          Diseñado específicamente para reducir el ausentismo con
+          confirmaciones automáticas de cita · Compatible con Google Calendar
         </p>
 
         {/* Hero visual */}

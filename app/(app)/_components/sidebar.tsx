@@ -54,10 +54,8 @@ export function Sidebar({ orgName, userName, userEmail }: SidebarProps) {
     <aside className="w-64 flex-shrink-0 flex flex-col bg-stone-50 border-r border-stone-200 h-full">
       {/* Brand */}
       <div className="px-5 pt-5 pb-4 border-b border-stone-200">
-        <div className="text-lg leading-none tracking-tight">
-          <span className="font-bold text-teal-700">AS</span>
-          <span className="font-semibold text-slate-800">Dent</span>
-        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element -- SVG estático, sin next/image en el resto del proyecto */}
+        <img src="/asdent-logo.svg" alt="ASDent" className="h-7 w-auto" />
         <p className="mt-1.5 text-xs text-stone-400 truncate">{orgName}</p>
       </div>
 

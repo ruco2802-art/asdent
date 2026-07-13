@@ -15,6 +15,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "ASDent — Agente IA para clínicas dentales",
   description: "Plataforma SaaS para gestión de citas vía WhatsApp con agente IA.",
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
