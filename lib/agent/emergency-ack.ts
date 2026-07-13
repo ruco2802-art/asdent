@@ -5,6 +5,7 @@ import { anthropic } from "@ai-sdk/anthropic";
 // forma posible de describir una urgencia dental. Cuando no matchea, el
 // flujo normal del agente sigue igual (sin el mensaje de empatía aparte).
 const EMERGENCY_PATTERNS: RegExp[] = [
+  // Trauma físico
   /se me (parti|romp|quebr)[oó]?.{0,15}\b(muela|diente)/i,
   /(muela|diente).{0,15}(se me )?(parti|romp|quebr)/i,
   /se me cay[oó] (un |el )?diente/i,
@@ -13,8 +14,19 @@ const EMERGENCY_PATTERNS: RegExp[] = [
   /sangr/i,
   /(muela|diente).{0,20}hincha/i,
   /hincha.{0,20}(muela|diente)/i,
+
+  // Dolor / molestia dental — genérico, sin exigir calificativo de
+  // intensidad. "dolor de muela" es probablemente la forma MÁS común de
+  // reportar una urgencia, y la versión anterior de esta lista no la cubría.
+  /(dolor|duele|doliendo|molestia).{0,20}(muela|diente|dientes|enc[ií]a)/i,
+  /(muela|diente|dientes|enc[ií]a).{0,20}(dolor|duele|doliendo|molestia)/i,
+  /\bduele\b/i,
+  /\bdoliendo\b/i,
+  /tengo (un |una )?dolor/i,
   /dolor (fuerte|insoportable|intenso)/i,
   /mucho dolor/i,
+
+  // Urgencia explícita
   /\burgencia\b/i,
   /\bemergencia\b/i,
 ];

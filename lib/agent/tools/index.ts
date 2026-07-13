@@ -13,8 +13,16 @@ export interface AgentContext {
   waPhone: string; // E.164, e.g. "+573001234567"
 }
 
-export function createAgentTools(ctx: AgentContext) {
-  return {
+interface CreateAgentToolsOptions {
+  // true en el turno donde se detecta por primera vez una urgencia dental —
+  // saca las tools de agendamiento para forzar una respuesta de puro texto
+  // empático, sin competir contra el resultado de get_available_slots (ver
+  // lib/agent/emergency-ack.ts).
+  suppressScheduling?: boolean;
+}
+
+export function createAgentTools(ctx: AgentContext, options: CreateAgentToolsOptions = {}) {
+  const tools = {
     get_available_slots: createGetAvailableSlotsTool(ctx.organizationId),
     book_appointment: createBookAppointmentTool(ctx),
     cancel_appointment: createCancelAppointmentTool(ctx),
@@ -23,4 +31,11 @@ export function createAgentTools(ctx: AgentContext) {
     save_contact_info: createSaveContactInfoTool(ctx.contactId),
     request_human_handoff: createRequestHumanHandoffTool(ctx),
   };
+
+  if (options.suppressScheduling) {
+    const { get_available_slots, book_appointment, ...rest } = tools;
+    return rest;
+  }
+
+  return tools;
 }

@@ -116,7 +116,7 @@ Etapa de agendamiento: ${stateText}
 Datos recolectados hasta ahora: ${dataText}
 
 REGLAS QUE DEBES SEGUIR SIN EXCEPCIÓN:
-1. Si el paciente menciona dolor, urgencia o emergencia dental, usa get_available_slots con is_urgent: true (en ese caso, salta el paso de preguntar mañana/tarde — busca lo antes posible). Si el paciente hace una pregunta puntual (ej. "¿debo llevar radiografía?"), respóndela directamente antes o junto con ofrecer el horario — nunca la ignores repitiendo solo disponibilidad.
+1. Si el paciente menciona dolor, urgencia o emergencia dental, usa get_available_slots con is_urgent: true (en ese caso, salta el paso de preguntar mañana/tarde — busca lo antes posible). Si el paciente hace una pregunta puntual (ej. "¿debo llevar radiografía?"), respóndela directamente antes o junto con ofrecer el horario — nunca la ignores repitiendo solo disponibilidad. Además — sin importar si el sistema ya detectó la urgencia formalmente y ya envió algún reconocimiento aparte — si el paciente menciona cualquier dolor, molestia o urgencia dental, reconócelo con empatía en la primera frase de tu propia respuesta. Esto es una red de respaldo de bajo costo: no está de más aunque ya se haya reconocido antes, y es la única protección para los casos que el sistema no alcance a detectar.
 2. Recolecta los datos en orden: servicio → ¿es nuevo paciente? → nombre completo (sáltatelo si ya lo sabes) → preferencia de horario (mañana o tarde) → slot → datos clínicos si aplica → confirmación explícita.
 3. Nunca muestres fechas en formato ISO al paciente. Usa siempre el campo "label" que devuelve get_available_slots — no calcules tú el día de la semana.
 4. Nunca le preguntes al paciente "mañana o tarde" a ciegas — primero verifica qué hay realmente disponible (salvo que ya haya urgencia o el paciente ya haya dicho su preferencia espontáneamente). Llama a get_available_slots dos veces para el mismo día: una con time_of_day "mañana" y otra con "tarde" (mismo skip_days/preferred_date en ambas), sin mostrarle nada al paciente todavía. Luego:
@@ -192,16 +192,26 @@ export interface ImageAttachment {
   caption?: string; // text sent alongside the image (WhatsApp caption field)
 }
 
+// "first_mention": turno donde se detectó por primera vez una urgencia
+// dental (ver isEmergencyMessage en emergency-ack.ts) — se le quitan las
+// tools de agendamiento para forzar una respuesta de puro texto, ya que el
+// mensaje de empatía aparte se envía por fuera de este flujo.
+// "follow_up": el turno inmediatamente después de un reconocimiento de
+// urgencia — se restauran las tools completas con una pista puntual para
+// usar is_urgent: true en get_available_slots.
+type EmergencyPhase = "first_mention" | "follow_up";
+
 interface RunAgentParams extends AgentContext {
   bookingState: string | null;
   bookingData: Json | null;
   imageAttachment?: ImageAttachment;
+  emergencyPhase?: EmergencyPhase;
 }
 
 export async function runAgent(params: RunAgentParams): Promise<void> {
   const {
     organizationId, contactId, conversationId, waPhone,
-    bookingState, bookingData, imageAttachment,
+    bookingState, bookingData, imageAttachment, emergencyPhase,
   } = params;
 
   const db = createServiceClient();
@@ -232,13 +242,20 @@ export async function runAgent(params: RunAgentParams): Promise<void> {
   const contactName = (rawContact as Pick<Contact, "full_name"> | null)
     ?.full_name?.trim() || null;
 
-  const systemPrompt = buildSystemPrompt(
+  let systemPrompt = buildSystemPrompt(
     config,
     bookingState,
     bookingData,
     timezone,
     contactName
   );
+
+  if (emergencyPhase === "first_mention") {
+    systemPrompt += `\n\nESTE TURNO ES ESPECIAL: el paciente acaba de mencionar una urgencia/dolor dental, y ya se le envió un mensaje aparte de reconocimiento empático antes de que tú respondieras. Por eso en este mensaje NO tienes disponibles get_available_slots ni book_appointment a propósito — este turno es solo para conversar, dar información o tranquilidad, no para agendar todavía. En el próximo mensaje del paciente sí vas a poder buscar y ofrecer horario.`;
+  } else if (emergencyPhase === "follow_up") {
+    systemPrompt += `\n\nEl paciente mencionó una urgencia/dolor dental en su mensaje anterior, que ya reconociste con empatía. Ahora sí continúa el flujo de agendamiento con normalidad — cuando uses get_available_slots, hazlo con is_urgent: true.`;
+  }
+
   const history = await fetchMessageHistory(conversationId, db);
 
   // Build the messages array, injecting image into the last user turn if present
@@ -297,7 +314,9 @@ export async function runAgent(params: RunAgentParams): Promise<void> {
         // DECISION: cast necesario — Msg es estructuralmente compatible con ModelMessage
         // pero TS no puede inferirlo por la unión discriminada de UserModelMessage.content
         messages: messages as unknown as ModelMessage[],
-        tools: createAgentTools(agentCtx),
+        tools: createAgentTools(agentCtx, {
+          suppressScheduling: emergencyPhase === "first_mention",
+        }),
         stopWhen: stepCountIs(10),
         temperature: 0.3,
       });

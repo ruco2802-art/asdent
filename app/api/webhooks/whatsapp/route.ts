@@ -572,9 +572,33 @@ async function processInboundMessage(
   // reconocimiento empático aparte, antes de que el flujo normal del agente
   // ofrezca un horario (ver comentario en sendEmergencyAck sobre por qué el
   // insert en `messages` se difiere hasta después de runAgent).
+  //
+  // Para decidir la fase (primera mención vs. turno de seguimiento) se
+  // revisa el mensaje saliente más reciente de esta conversación: si fue un
+  // ack de emergencia, este turno restaura las tools completas con una
+  // pista de is_urgent. Se deriva del historial en vez de una bandera
+  // persistente porque estas conversaciones duran días — una bandera fija
+  // en "true" para siempre bloquearía el mismo tratamiento en una segunda
+  // urgencia real, más adelante en el mismo hilo.
   let pendingAck: PendingAck | null = null;
-  if (botActive && content && isEmergencyMessage(content)) {
+  let emergencyPhase: "first_mention" | "follow_up" | undefined;
+
+  const { data: rawLastOutbound } = await db
+    .from("messages")
+    .select("raw")
+    .eq("conversation_id", conversationId)
+    .eq("direction", "outbound")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const lastOutboundRaw = (rawLastOutbound as { raw: { type?: string } | null } | null)?.raw;
+  const lastOutboundWasAck = lastOutboundRaw?.type === "emergency_ack";
+
+  if (lastOutboundWasAck) {
+    emergencyPhase = "follow_up";
+  } else if (botActive && content && isEmergencyMessage(content)) {
     pendingAck = await sendEmergencyAck(organizationId, waPhone, content, db);
+    emergencyPhase = "first_mention";
   }
 
   // 5. Log + invoke agent
@@ -627,6 +651,7 @@ async function processInboundMessage(
         bookingState,
         bookingData,
         imageAttachment,
+        emergencyPhase,
       });
     }
   } finally {
@@ -634,6 +659,8 @@ async function processInboundMessage(
     // después de que runAgent ya haya leído el historial — nunca antes, o
     // fetchMessageHistory vería la conversación terminando en un turno
     // "assistant" y rompería el requisito de Claude de terminar en "user".
+    // Se etiqueta con raw.type "emergency_ack" para que el próximo mensaje
+    // del paciente lo detecte como turno de seguimiento (ver 4.5 arriba).
     if (pendingAck) {
       await db.from("messages").insert({
         conversation_id: conversationId,
@@ -642,6 +669,7 @@ async function processInboundMessage(
         direction: "outbound",
         sender: "bot",
         content: pendingAck.text,
+        raw: { type: "emergency_ack" } as unknown as Json,
         created_at: pendingAck.createdAt,
       });
     }
