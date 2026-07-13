@@ -17,7 +17,7 @@ export default function LandingPage() {
       <header className="sticky top-0 z-30 bg-stone-50/90 backdrop-blur border-b border-stone-200">
         <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
           {/* eslint-disable-next-line @next/next/no-img-element -- SVG estático, sin next/image en el resto del proyecto */}
-          <img src="/asdent-logo.svg" alt="ASDent" className="h-6 w-auto" />
+          <img src="/asdent-logo.svg" alt="ASDent" className="block h-7 w-auto" />
           <div className="flex items-center gap-3">
             <Link
               href="/login"
@@ -55,7 +55,7 @@ export default function LandingPage() {
 
         <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-3">
           <a
-            href="https://wa.me/573118372701?text=Hola%2C%20quiero%20ver%20c%C3%B3mo%20funciona%20Asdent"
+            href="https://wa.me/573118372701?text=Hola%2C%20me%20gustar%C3%ADa%20m%C3%A1s%20informaci%C3%B3n"
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 bg-teal-700 text-white font-semibold px-7 py-3 rounded-xl hover:bg-teal-800 transition-colors text-sm shadow-sm shadow-teal-900/10"
@@ -311,12 +311,8 @@ export default function LandingPage() {
       {/* ── Footer ───────────────────────────────────────────── */}
       <footer className="border-t border-stone-200 bg-stone-50">
         <div className="max-w-5xl mx-auto px-6 py-6 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="w-5 h-5 rounded bg-teal-700 flex items-center justify-center">
-              <Robot size={11} weight="fill" className="text-white" />
-            </span>
-            <span className="text-xs font-semibold text-slate-600">ASDent</span>
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element -- SVG estático, sin next/image en el resto del proyecto */}
+          <img src="/asdent-logo.svg" alt="ASDent" className="block h-5 w-auto" />
           <p className="text-xs text-stone-400">
             Agente IA para clínicas dentales · Hecho en Colombia
           </p>
