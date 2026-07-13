@@ -1,6 +1,17 @@
+import type { BusyPeriod } from "@/lib/google-calendar";
+
 export interface ServiceConfig {
   name: string;
   duration_minutes?: number;
+}
+
+export function isSlotBusy(
+  slotStart: Date,
+  durationMs: number,
+  busyPeriods: BusyPeriod[]
+): boolean {
+  const slotEnd = new Date(slotStart.getTime() + durationMs);
+  return busyPeriods.some((b) => slotStart < b.end && slotEnd > b.start);
 }
 
 export type TimePeriod = { start: string; end: string };

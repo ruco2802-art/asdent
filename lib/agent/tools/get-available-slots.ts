@@ -10,16 +10,8 @@ import {
   getWeekdayInTz,
   getDatePartsInTz,
   localToUTC,
+  isSlotBusy,
 } from "./_utils";
-
-function isSlotBusy(
-  slotStart: Date,
-  durationMs: number,
-  busyPeriods: BusyPeriod[]
-): boolean {
-  const slotEnd = new Date(slotStart.getTime() + durationMs);
-  return busyPeriods.some((b) => slotStart < b.end && slotEnd > b.start);
-}
 
 type TimeOfDay = "mañana" | "tarde";
 const NOON_MIN = 12 * 60;
@@ -217,23 +209,53 @@ export function createGetAvailableSlotsTool(organizationId: string) {
         overview
       );
 
-      // Filter by Google Calendar FreeBusy if the org has it configured
       let slots = rawSlots;
+      const windowDays = is_urgent ? 2 : days_ahead;
+      const timeMin = now;
+      const timeMax = new Date(now.getTime() + windowDays * 24 * 60 * 60 * 1000);
+      const durationMs = durationMin * 60 * 1000;
+
+      // Chequeo directo contra nuestra propia tabla appointments — el
+      // respaldo base, independiente de Google Calendar. Incidente real
+      // 2026-07-13: Kevin Cano y Dairo Cano quedaron agendados a la misma
+      // hora porque este tool solo excluía horarios ocupados vía Calendar
+      // FreeBusy; cuando el token de Calendar de la organización murió de
+      // forma silenciosa, ninguna cita ya agendada volvió a excluirse.
+      if (rawSlots.length > 0) {
+        const { data: existingAppts } = await db
+          .from("appointments")
+          .select("starts_at, ends_at")
+          .eq("organization_id", organizationId)
+          .neq("status", "cancelled")
+          .gte("starts_at", timeMin.toISOString())
+          .lte("starts_at", timeMax.toISOString());
+
+        const dbBusyPeriods: BusyPeriod[] = (
+          (existingAppts ?? []) as { starts_at: string; ends_at: string }[]
+        ).map((a) => ({ start: new Date(a.starts_at), end: new Date(a.ends_at) }));
+
+        if (dbBusyPeriods.length > 0) {
+          slots = slots.filter(
+            (iso) => !isSlotBusy(new Date(iso), durationMs, dbBusyPeriods)
+          );
+        }
+      }
+
+      // Filter by Google Calendar FreeBusy if the org has it configured —
+      // capa adicional para eventos externos que no pasaron por nuestra
+      // tabla appointments (ej. el odontólogo bloqueó un espacio manualmente).
       const gcal = await getGoogleCalendarContext(organizationId).catch(() => null);
-      if (gcal && rawSlots.length > 0) {
-        const windowDays = is_urgent ? 2 : days_ahead;
-        const timeMin = now;
-        const timeMax = new Date(now.getTime() + windowDays * 24 * 60 * 60 * 1000);
+      if (gcal && slots.length > 0) {
         try {
           const busyPeriods = await getFreeBusy(gcal.accessToken, gcal.calendarId, timeMin, timeMax);
           if (busyPeriods.length > 0) {
-            const durationMs = durationMin * 60 * 1000;
-            slots = rawSlots.filter(
+            slots = slots.filter(
               (iso) => !isSlotBusy(new Date(iso), durationMs, busyPeriods)
             );
           }
         } catch {
-          // FreeBusy failed — return unfiltered slots rather than blocking booking
+          // FreeBusy failed — el chequeo contra appointments ya cubrió la
+          // garantía base; no bloqueamos la reserva por esto.
           console.error(
             JSON.stringify({ event: "freebusy_error", organization_id: organizationId })
           );

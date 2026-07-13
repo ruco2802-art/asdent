@@ -359,6 +359,7 @@ export interface Database {
           confirmation_status: string;
           confirmation_sent_at: string | null;
           confirmation_attempts: number;
+          calendar_sync_error: string | null;
           created_at: string | null;
         };
         Insert: {
@@ -379,6 +380,7 @@ export interface Database {
           confirmation_status?: string;
           confirmation_sent_at?: string | null;
           confirmation_attempts?: number;
+          calendar_sync_error?: string | null;
           created_at?: string | null;
         };
         Update: {
@@ -399,6 +401,7 @@ export interface Database {
           confirmation_status?: string;
           confirmation_sent_at?: string | null;
           confirmation_attempts?: number;
+          calendar_sync_error?: string | null;
           created_at?: string | null;
         };
         Relationships: [

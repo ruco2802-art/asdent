@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createServiceClient } from "@/lib/supabase/service";
 import {
   getGoogleCalendarContext,
+  getFreeBusy,
   createCalendarEvent,
 } from "@/lib/google-calendar";
 import type { AgentConfig, Organization, Json } from "@/lib/database.types";
@@ -11,7 +12,24 @@ import {
   type BusinessHours,
   getServiceDuration,
   getWeekdayInTz,
+  isSlotBusy,
 } from "./_utils";
+
+const SLOT_TAKEN_MESSAGE =
+  "Ese horario se acaba de ocupar — vuelve a llamar a get_available_slots para ofrecer una alternativa cercana antes de confirmar de nuevo con el paciente.";
+
+// Código de Postgres para violación de restricción unique/exclusion —
+// usado por el índice appointments_org_starts_at_active_unique (migración
+// 20260713000000) que impide dos citas activas de la misma organización a
+// la misma hora, sin importar si Google Calendar detectó el choque o no.
+const POSTGRES_UNIQUE_VIOLATION = "23505";
+
+// TODO(solapamiento por duración): la restricción unique de la BD solo
+// compara starts_at exacto — dos citas con horas de inicio DISTINTAS pero
+// que se solapan por duración (ej. 3:00pm de 60min y 3:30pm de 30min) no
+// se detectan como conflicto todavía. Pendiente documentado a propósito
+// (alcance acordado 2026-07-13): resolver comparando el rango completo
+// [starts_at, ends_at) contra citas existentes, no solo el inicio.
 
 interface BookContext {
   organizationId: string;
@@ -182,6 +200,51 @@ export function createBookAppointmentTool(ctx: BookContext) {
         };
       }
 
+      // Fix 1 — re-verificación de disponibilidad justo antes de reservar:
+      // el horario pudo haberse ocupado (en Calendar, por un evento externo
+      // ej. el odontólogo bloqueando el espacio manualmente) entre que
+      // get_available_slots lo ofreció y que el paciente confirmó. Usa la
+      // timezone de la organización (ya resuelta arriba) para la ventana de
+      // la cita — nunca UTC crudo, ya tuvimos bugs de zona horaria antes.
+      // El chequeo contra nuestra propia tabla appointments (el caso más
+      // común de choque) lo hace la restricción unique de la BD al
+      // insertar, más abajo — esto cubre específicamente el caso de
+      // Calendar.
+      const gcal = await getGoogleCalendarContext(organizationId).catch(() => null);
+      if (gcal) {
+        try {
+          const busyPeriods = await getFreeBusy(
+            gcal.accessToken,
+            gcal.calendarId,
+            startsAt,
+            endsAt
+          );
+          if (isSlotBusy(startsAt, endsAt.getTime() - startsAt.getTime(), busyPeriods)) {
+            return { error: SLOT_TAKEN_MESSAGE };
+          }
+        } catch {
+          // FreeBusy no disponible ahora mismo — no bloqueamos la reserva
+          // por esto; la restricción unique de la BD sigue siendo la
+          // garantía dura para choques contra citas ya registradas.
+          console.error(
+            JSON.stringify({
+              event: "book_appointment_freebusy_recheck_error",
+              organization_id: organizationId,
+              conversation_id: conversationId,
+              starts_at: startsAtISO,
+            })
+          );
+        }
+      }
+
+      // Fix 2/3 — el insert es la operación que decide de verdad: si otra
+      // reserva para esta misma organización y hora exacta ganó la carrera
+      // (simultánea o no), la restricción unique appointments_org_starts_at
+      // _active_unique (migración 20260713000000) rechaza este insert con
+      // el código 23505 en vez de crear un duplicado silencioso. Solo si el
+      // insert tuvo éxito se sigue a crear el evento en Google Calendar más
+      // abajo — así nunca queda una cita confirmada en la BD sin haber
+      // pasado primero por esta verificación.
       const { data: appt, error: apptError } = await db
         .from("appointments")
         .insert({
@@ -197,10 +260,13 @@ export function createBookAppointmentTool(ctx: BookContext) {
           phone: waPhone,
           medical_notes: medical_notes ?? null,
           notes: reason,
-          // google_event_id: null — TODO Paso 10
         })
         .select("id")
         .single();
+
+      if (apptError?.code === POSTGRES_UNIQUE_VIOLATION) {
+        return { error: SLOT_TAKEN_MESSAGE };
+      }
 
       if (apptError || !appt) {
         return {
@@ -217,8 +283,11 @@ export function createBookAppointmentTool(ctx: BookContext) {
         .update({ booking_state: "done", booking_data: {} as Json })
         .eq("id", conversationId);
 
-      // Create Google Calendar event (best-effort — doesn't block the booking)
-      const gcal = await getGoogleCalendarContext(organizationId).catch(() => null);
+      // Create Google Calendar event. La cita ya quedó confirmada en la BD
+      // (fuente de verdad principal) — esto no bloquea la reserva del
+      // paciente, pero si falla se marca calendar_sync_error en vez de
+      // fallar en silencio (Fix 3: nunca dejar una cita en un sistema y no
+      // en el otro sin que quede una señal clara para reconciliar).
       if (gcal) {
         try {
           const eventDesc = [
@@ -251,6 +320,7 @@ export function createBookAppointmentTool(ctx: BookContext) {
             .update({ google_event_id: googleEventId })
             .eq("id", appointmentId);
         } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : String(err);
           console.error(
             JSON.stringify({
               event: "google_event_error",
@@ -260,10 +330,14 @@ export function createBookAppointmentTool(ctx: BookContext) {
               calendar_id: gcal.calendarId,
               starts_at: startsAtISO,
               ends_at: endsAt.toISOString(),
-              error: err instanceof Error ? err.message : String(err),
+              error: errorMessage,
               stack: err instanceof Error ? err.stack : undefined,
             })
           );
+          await db
+            .from("appointments")
+            .update({ calendar_sync_error: errorMessage })
+            .eq("id", appointmentId);
         }
       }
 
